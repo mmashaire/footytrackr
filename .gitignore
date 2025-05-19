@@ -1,0 +1,10 @@
+# Ignore raw and processed data folders
+data/raw/
+data/processed/
+
+# Ignore Python and Jupyter junk
+__pycache__/
+*.ipynb_checkpoints
+*.pyc
+.env
+.DS_Store
