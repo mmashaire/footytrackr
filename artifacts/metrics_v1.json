@@ -1,0 +1,26 @@
+{
+  "cutoff_date": "2022-05-18",
+  "baseline_global_median": {
+    "rmse_log": 1.7184287306069177,
+    "mae_log": 1.3397489169689831,
+    "mae_eur": 3077309.2490483797
+  },
+  "baseline_position_age": {
+    "rmse_log": 1.6477070287067974,
+    "mae_log": 1.2878467518567729,
+    "mae_eur": 3052596.3923790017
+  },
+  "ridge_model": {
+    "rmse_log": 1.13134090873758,
+    "mae_log": 0.8926900228212118,
+    "mae_eur": 2331527.1190485223
+  },
+  "n_train": 396473,
+  "n_test": 99567,
+  "date_train_min": "2003-12-09",
+  "date_train_max": "2022-05-17",
+  "date_test_min": "2022-05-18",
+  "date_test_max": "2025-04-06",
+  "model_path": "artifacts/ridge_model_v1.joblib",
+  "top_coefficients_path": "artifacts/ridge_top_coefficients_v1.csv"
+}
