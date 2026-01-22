@@ -141,3 +141,5 @@ It is deliberately opinionated and iterative.
 
 Transfermarkt market values are estimates and reflect market perception rather than objective player skill.  
 This project analyzes patterns in the data, not absolute player quality.
+
+
