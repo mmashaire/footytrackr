@@ -102,6 +102,7 @@ footytrackr/
 │   └── ablation_v*.csv
 ├── notebooks/               # exploratory analysis
 └── visuals/                 # saved plots and figures
+```
 
 ---
 
