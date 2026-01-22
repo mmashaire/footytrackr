@@ -84,21 +84,25 @@ The model is intentionally simple. The focus is on understanding the data and fe
 
 ## Project structure
 
+## Project structure
+
+```text
 footytrackr/
 ├── data/
-│ ├── raw/ # original CSVs (ignored in Git)
-│ └── features/ # versioned feature tables
+│   ├── raw/                 # original CSVs (ignored in Git)
+│   └── features/            # versioned feature tables
 ├── scripts/
-│ ├── 01_profile_raw.py
-│ ├── 02_build_value_features_v*.py
-│ └── 03_train_market_value.py
+│   ├── 01_profile_raw.py
+│   ├── 02_build_value_features_v*.py
+│   └── 03_train_market_value.py
 ├── artifacts/
-│ ├── metrics_v*.json
-│ ├── ridge_model_v*.joblib
-│ ├── ridge_top_coefficients_v*.csv
-│ └── ablation_v*.csv
-├── notebooks/ # exploratory analysis
-└── visuals/ # saved plots and figures
+│   ├── metrics_v*.json
+│   ├── ridge_model_v*.joblib
+│   ├── ridge_top_coefficients_v*.csv
+│   └── ablation_v*.csv
+├── notebooks/               # exploratory analysis
+└── visuals/                 # saved plots and figures
+
 ---
 
 ## Tools used
