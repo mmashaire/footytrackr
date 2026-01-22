@@ -84,8 +84,6 @@ The model is intentionally simple. The focus is on understanding the data and fe
 
 ## Project structure
 
-## Project structure
-
 ```text
 footytrackr/
 ├── data/
