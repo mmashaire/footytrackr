@@ -1,0 +1,14 @@
+{
+  "baseline": {
+    "mae_eur": 2344544.7528988994,
+    "median_abs_err_eur": 385456.82262873044,
+    "mean_signed_err_eur": -1652575.042717915
+  },
+  "bias_corrected": {
+    "mae_eur": 2638887.2593141356,
+    "median_abs_err_eur": 816178.9383346718,
+    "mean_signed_err_eur": 242594.55956224888
+  },
+  "smearing_factor": 2.142296661001852,
+  "n_test": 99567
+}
