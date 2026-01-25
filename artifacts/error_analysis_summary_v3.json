@@ -1,0 +1,7 @@
+{
+  "n_test_rows": 99567,
+  "cutoff_date": "2022-05-18",
+  "mae_eur": 2344544.7528988994,
+  "median_abs_err_eur": 385456.82262873044,
+  "mean_signed_err_eur": -1652575.042717915
+}
