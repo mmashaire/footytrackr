@@ -1,0 +1,12 @@
+{
+  "model_version": "v3",
+  "interval": "10\u201390%",
+  "target_coverage": 0.8,
+  "empirical_coverage": 0.8079685036206775,
+  "n_test": 99567,
+  "residual_quantiles_log": {
+    "q10": -1.4295657239952053,
+    "q50": -0.0699923122683348,
+    "q90": 1.5119067652468274
+  }
+}

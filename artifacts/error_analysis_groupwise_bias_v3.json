@@ -1,0 +1,15 @@
+{
+  "baseline": {
+    "mae_eur": 2344544.7528988994,
+    "median_abs_err_eur": 385456.82262873044,
+    "mean_signed_err_eur": -1652575.042717915
+  },
+  "groupwise_bias_corrected": {
+    "mae_eur": 2663610.201042851,
+    "median_abs_err_eur": 820607.5076927808,
+    "mean_signed_err_eur": 313132.37253482017
+  },
+  "global_fallback_smearing": 2.142296661001852,
+  "n_test": 99567,
+  "group_col": "player_club_domestic_competition_id"
+}
