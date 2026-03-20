@@ -2,16 +2,26 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Union
+import argparse
+import logging
 
 import numpy as np
 import pandas as pd
 
 
-IN_PATH = Path("data/features/player_value_features_v1.csv")
-OUT_PATH = Path("data/features/player_value_features_v2.csv")
-
+# Default paths (can be overridden via CLI)
+DEFAULT_IN_PATH = Path("data/features/player_value_features_v1.csv")
+DEFAULT_OUT_PATH = Path("data/features/player_value_features_v2.csv")
 
 Number = Union[int, float, np.number]
+
+
+def setup_logging(level: str = "INFO") -> None:
+    """Set up logging configuration."""
+    logging.basicConfig(
+        level=getattr(logging, level.upper()),
+        format="%(asctime)s - %(levelname)s - %(message)s",
+    )
 
 
 def safe_divide(numer: pd.Series, denom: Union[pd.Series, Number]) -> pd.Series:
@@ -72,26 +82,50 @@ def add_rate_features(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
     return df
 
 
-def main() -> None:
-    if not IN_PATH.exists():
-        raise FileNotFoundError(f"Missing input file: {IN_PATH.resolve()}")
+def main(in_path: Path, out_path: Path) -> None:
+    logging.info(f"Starting feature building from {in_path} to {out_path}")
 
-    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if not in_path.exists():
+        raise FileNotFoundError(f"Missing input file: {in_path.resolve()}")
 
-    df = pd.read_csv(IN_PATH, parse_dates=["date"])
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    df = pd.read_csv(in_path, parse_dates=["date"])
+    logging.info(f"Loaded {len(df):,} rows from input file")
 
     # Add rate features for both windows
     df = add_rate_features(df, "w180")
     df = add_rate_features(df, "w365")
+    logging.info("Added rate features for w180 and w365 windows")
 
-    df.to_csv(OUT_PATH, index=False)
+    df.to_csv(out_path, index=False)
+    logging.info(f"Saved v2 features to {out_path}")
 
     new_cols = [c for c in df.columns if ("per90" in c) or ("minutes_per_game" in c) or ("played_any_minutes" in c)]
-    print(f"Saved v2 features: {OUT_PATH.as_posix()}")
-    print(f"Rows: {len(df):,} | Columns: {len(df.columns):,}")
-    print(f"Added {len(new_cols)} derived columns. Sample:")
-    print(new_cols[:25])
+    logging.info(f"Added {len(new_cols)} derived columns. Sample: {new_cols[:10]}")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Build v2 player value features with rate calculations.")
+    parser.add_argument(
+        "--input",
+        type=Path,
+        default=DEFAULT_IN_PATH,
+        help="Path to input features CSV (default: data/features/player_value_features_v1.csv)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=DEFAULT_OUT_PATH,
+        help="Path to output features CSV (default: data/features/player_value_features_v2.csv)",
+    )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+        help="Set logging level (default: INFO)",
+    )
+
+    args = parser.parse_args()
+    setup_logging(args.log_level)
+    main(args.input, args.output)

@@ -8,3 +8,12 @@ __pycache__/
 *.pyc
 .env
 .DS_Store
+
+# Models
+artifacts/*.joblib
+
+# Data
+data/
+
+# DuckDB
+*.duckdb

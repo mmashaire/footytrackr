@@ -1,223 +1,163 @@
 # Footytrackr
 
-**Footytrackr** is a football data project built around historical Transfermarkt data. The goal is to practice realistic data engineering and applied data science workflows using a large, messy, real-world dataset.
+Footytrackr is a football analytics project I built to answer one practical question:
 
-## Project Focus
+Can we estimate player market value in a way that is simple, honest about uncertainty, and easy to explain?
 
-The project focuses on:
-- **Building reproducible feature pipelines**
-- **Training and evaluating simple, interpretable models**
-- **Understanding what actually drives player market value** through analysis, ablation studies, and diagnostics.
+I used historical Transfermarkt data and treated this like a small real-world data product, not a one-off notebook. The focus is on clean pipelines, reproducible outputs, and decisions that can be defended.
 
-> **Note:** This is not a tutorial project. It is intentionally exploratory and iterative.
+## Why I built this
 
-## Dataset
+Most portfolio projects stop at model accuracy. I wanted to go further and show how I think when working through messy data end to end:
 
-The data originates from Transfermarkt and includes:
-- Player profiles and market values
-- Match appearances and minutes played
-- Goals, assists, cards, and playing time
-- Club, competition, and league context
-- Transfer history
+- Building versioned features that can be compared over time
+- Avoiding leakage with strict time-based splits
+- Measuring model behavior, not just headline scores
+- Turning single-value predictions into useful prediction ranges
+- Documenting trade-offs clearly
 
-The raw dataset contains hundreds of thousands of rows spanning multiple decades and leagues.
+This project reflects how I like to work: practical, transparent, and iterative.
 
-## What is implemented
-### Feature pipeline
+## What the project contains
 
-Raw CSVs are transformed into model-ready feature tables using versioned scripts:
-- Rolling performance aggregates over 180 and 365 days
-- Per-90 performance rates (goals, assists, cards)
-- Age, position, physical attributes (where available)
-- Club and league context features
-- Categorical grouping to control feature cardinality
+### 1) Data pipeline
 
-Feature versions are saved explicitly (v1, v2, v3) to allow comparisons.
+Raw football data is cleaned and transformed into model-ready tables with versioned scripts.
 
-**Output:**
-```
-data/features/player_value_features_v*.csv
-```
+Core feature sets include:
 
-### Market value model
+- Rolling windows over 180 and 365 days
+- Per-90 rates for goals, assists, and cards
+- Age and position context
+- Club and league context
 
-A linear Ridge regression model is trained to predict log-transformed market value.
+Outputs are stored as versioned CSVs so results can be reproduced and compared:
 
-**Key design choices:**
-- Strict time-based train/test split to prevent leakage
-- No direct identifiers or raw euro values used as features
-- Global median and position+age baselines for comparison
-- Model interpretability preserved through linear coefficients
+- data/features/player_value_features_v1.csv
+- data/features/player_value_features_v2.csv
+- data/features/player_value_features_v3.csv
 
-**Artifacts saved per run:**
-- Evaluation metrics (artifacts/metrics_v*.json)
-- Coefficient tables (artifacts/ridge_top_coefficients_v*.csv)
-- Ablation results (artifacts/ablation_v*.csv)
+### 2) Market value model
 
-Trained models (.joblib) are kept local and reproducible, not required for Git.
+The model is intentionally simple: Ridge regression on log-transformed market value.
 
-### Ablation study
+Why this choice:
 
-An ablation study is used to understand feature reliance.
+- It gives strong enough performance for this use case
+- Coefficients remain interpretable
+- It is easy to debug and communicate to non-ML audiences
 
-The same model is trained under different feature restrictions:
-- Full feature set
-- Without nationality features
-- Without nationality and league context
-- Performance-only features
+Each training run produces saved artifacts, including:
 
-This allows direct measurement of how much each feature group contributes to predictive performance.
+- Metrics summaries
+- Top coefficients
+- Ablation results
+- Trained model files
 
-### Model diagnostics (error analysis & calibration)
+### 3) Diagnostics and error analysis
 
-Beyond headline metrics, the model is evaluated using:
-- Error slicing by position and league
-- Top over- and under-predictions
-- Residual distribution analysis
-- Calibration-by-deciles (mean predicted vs mean actual)
+Beyond MAE and RMSE, the project checks where the model is wrong and why.
 
-**Artifacts and visuals:**
-- artifacts/error_by_position_v*.csv
-- artifacts/error_by_league_v*.csv
-- artifacts/top_overpredictions_v*.csv
-- artifacts/top_underpredictions_v*.csv
-- visuals/residual_hist_v*.png
-- visuals/pred_vs_actual_log_v*.png
-- visuals/calibration_deciles_v*.png
+Included analyses:
 
-### Log-target bias correction (smearing)
+- Error by position
+- Error by league
+- Over- and under-prediction cases
+- Calibration by decile
 
-Market values are modeled in log space (log1p(EUR)) to handle heavy-tailed distributions.
-Back-transforming predictions to euros introduces bias.
+This helps answer engineering questions such as:
 
-The project includes Duan smearing correction experiments:
-- Global smearing factor
-- Groupwise smearing by domestic competition (league)
+- Is the model consistently biased in certain groups?
+- Are strong average metrics hiding weak subgroup performance?
 
-These experiments demonstrate bias–variance trade-offs rather than optimizing a single score.
+### 4) Bias correction experiments
 
-**Artifacts:**
-- artifacts/bias_correction_v*.json
-- artifacts/error_analysis_bias_comparison_v*.csv
-- artifacts/error_analysis_groupwise_comparison_v*.csv
-- visuals/calibration_deciles_bias_corrected_v*.png
-- visuals/calibration_deciles_groupwise_v*.png
+Because targets are modeled in log space, back-transforming to EUR can introduce bias.
 
-### Prediction intervals (recommended output)
+I tested:
 
-Single euro point predictions are misleading for heavy-tailed targets.
+- Global smearing correction
+- Groupwise smearing correction
 
-Instead, the project computes prediction intervals using empirical residual quantiles from training data.
+The goal here is not to claim a perfect correction, but to make the error profile visible and measurable.
 
-**Implemented:**
-- Central 80% prediction interval (10–90%)
-- Empirical coverage validation on future test data
+### 5) Prediction intervals
 
-**Example (v3):**
-- Target coverage: 80%
-- Empirical coverage on test: ~81%
+Point estimates can look precise while being misleading.
 
-**Artifacts:**
-- artifacts/prediction_intervals_v*.csv
-- artifacts/prediction_interval_summary_v*.json
-- visuals/prediction_interval_distribution_v*.png
+So the project also outputs prediction intervals (for example, central 80 percent) using residual quantiles from training data and validates their real coverage on future periods.
 
-This preserves median accuracy while making uncertainty explicit.
+This is the part I consider most practical for real usage.
 
-## Results summary (current)
+## Current results at a glance
 
-- Ridge regression significantly outperforms naïve baselines
-- Performance features contain signal, but context features explain a large share of variance
-- Nationality contributes some signal but is not dominant
-- Log-target bias is measurable and quantifiable
-- Prediction intervals show strong empirical calibration on future data
+- Ridge beats simple baselines by a clear margin
+- Context features add meaningful signal on top of pure performance stats
+- Bias from log back-transformation is real and quantifiable
+- Prediction intervals are well calibrated on held-out future data
 
-The model is intentionally simple. The focus is correctness, interpretability, and evaluation — not benchmark chasing.
+The model is not meant to be flashy. It is meant to be reliable, readable, and useful.
 
-## Reproducibility
+## Repository layout
 
-**Install dependencies:**
-```
+- scripts/: data prep, feature engineering, model training, diagnostics
+- data/: raw, processed, and feature data
+- artifacts/: metrics, coefficients, ablations, interval summaries
+- visuals/: charts used in evaluation and communication
+- notebooks/: exploratory analysis
+- footytrackr/: API and package code
+- tests/: checks for feature-building logic
+
+## How to run it
+
+Install dependencies:
+
+```bash
 pip install -r requirements.txt
 ```
 
-**(Optional) Build local DuckDB for fast analytics:**
-```
-python scripts/04_build_duckdb.py
-```
+Build features and train model:
 
-**Train the model and generate artifacts:**
-```
+```bash
+python scripts/02_build_value_features_v3.py
 python scripts/03_train_market_value.py
 ```
 
-**Run diagnostics:**
-```
-python scripts/06_error_analysis.py
-```
+Run diagnostics and uncertainty workflows:
 
-**Run bias correction experiments:**
-```
+```bash
+python scripts/06_error_analysis.py
 python scripts/07_bias_correction.py
 python scripts/08_groupwise_bias_correction.py
-```
-
-**Generate prediction intervals:**
-```
 python scripts/09_prediction_intervals.py
 ```
 
-## Project structure
+Optional: build local DuckDB for faster analysis:
 
-```
-footytrackr/
-├── data/
-│   ├── raw/ (ignored in Git)
-│   ├── processed/ (ignored in Git)
-│   ├── features/
-│   └── db/ (DuckDB, ignored in Git)
-├── scripts/
-│   ├── 01_profile_raw.py
-│   ├── 02_build_value_features_v*.py
-│   ├── 03_train_market_value.py
-│   ├── 04_build_duckdb.py
-│   ├── 06_error_analysis.py
-│   ├── 07_bias_correction.py
-│   ├── 08_groupwise_bias_correction.py
-│   └── 09_prediction_intervals.py
-├── artifacts/
-├── notebooks/
-├── visuals/
-├── requirements.txt
-└── README.md
+```bash
+python scripts/04_build_duckdb.py
 ```
 
-## Tools used
+## Tech stack
 
-- **Python**
-  - pandas, numpy
-  - scikit-learn
-  - joblib
-  - duckdb
-  - matplotlib
-- **Jupyter notebooks**
-- **VS Code**
+- Python
+- pandas, numpy, scikit-learn
+- duckdb
+- matplotlib
+- Jupyter
 
-No AutoML. No deep learning frameworks. No black boxes.
+No AutoML, no heavy framework dependency, and no black-box modeling choices in the core pipeline.
 
-## Why this project exists
+## Notes for recruiters and engineers
 
-This project is used to:
-- Practice data cleaning on imperfect real-world data
-- Design evolving feature pipelines
-- Evaluate models with leakage-safe splits
-- Reason about model behavior and uncertainty
-- Build artifact-driven, production-like workflows
-- Communicate results clearly
+If you are reviewing this for hiring:
 
-It is deliberately opinionated and iterative.
+- Recruiters: this project shows ownership across data, modeling, evaluation, and communication.
+- Engineers: scripts are versioned, artifacts are explicit, and decisions are traceable.
+
+I am happy to walk through design trade-offs, what I would productionize next, and what I would change with more time.
 
 ## Disclaimer
 
-Transfermarkt market values are estimates and reflect market perception rather than objective player skill.
-This project analyzes patterns in the data, not absolute player quality.
+Transfermarkt values are market estimates, not objective player quality.
+This project models patterns in those estimates and should be interpreted in that context.
