@@ -1,19 +1,33 @@
-# Ignore raw and processed data folders
-data/raw/
-data/processed/
-
-# Ignore Python and Jupyter junk
+# Python
 __pycache__/
-*.ipynb_checkpoints
 *.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment secrets — never commit real credentials
 .env
+
+# Jupyter
+*.ipynb_checkpoints
+
+# OS
 .DS_Store
+Thumbs.db
 
-# Models
-artifacts/*.joblib
-
-# Data
+# Data files — too large for git, not needed in repo
 data/
 
-# DuckDB
+# Trained model binaries
+artifacts/*.joblib
+
+# DuckDB database file
 *.duckdb

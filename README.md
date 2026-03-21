@@ -1,5 +1,7 @@
 # Footytrackr
 
+[![CI](https://github.com/mmashaire/footytrackr/actions/workflows/ci.yml/badge.svg)](https://github.com/mmashaire/footytrackr/actions/workflows/ci.yml)
+
 Footytrackr is a football analytics project I built to answer one practical question:
 
 Can we estimate player market value in a way that is simple, honest about uncertainty, and easy to explain?

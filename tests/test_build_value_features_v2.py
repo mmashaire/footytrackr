@@ -1,6 +1,6 @@
-import pytest
-import pandas as pd
 import numpy as np
+import pandas as pd
+
 from scripts.build_value_features_v2 import safe_divide
 
 

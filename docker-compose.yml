@@ -16,9 +16,9 @@ services:
   db:
     image: postgres:13
     environment:
-      POSTGRES_DB: footytrackr
-      POSTGRES_USER: footy
-      POSTGRES_PASSWORD: trackr
+      POSTGRES_DB: ${POSTGRES_DB:-footytrackr}
+      POSTGRES_USER: ${POSTGRES_USER:-footy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
