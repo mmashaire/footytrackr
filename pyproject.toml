@@ -7,7 +7,7 @@ name = "footytrackr"
 version = "0.1.0"
 description = "Football data project for predicting player market values using Transfermarkt data"
 authors = [
-    {name = "mmashaire", email = ""},
+    {name = "mmashaire"},
 ]
 readme = "README.md"
 requires-python = ">=3.9"
