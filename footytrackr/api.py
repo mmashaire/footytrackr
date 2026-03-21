@@ -3,6 +3,7 @@
 Footytrackr API - Simple REST API for player value predictions
 """
 
+import json
 from pathlib import Path
 
 import joblib
@@ -21,6 +22,23 @@ try:
 except FileNotFoundError:
     print(f"Warning: Model not found at {MODEL_PATH}")
     model = None
+
+# Load residual quantiles for prediction intervals
+# (computed by scripts/09_prediction_intervals.py)
+_PI_PATH = Path("artifacts/prediction_interval_summary_v3.json")
+try:
+    with open(_PI_PATH) as f:
+        _pi = json.load(f)
+    _Q10: float = _pi["residual_quantiles_log"]["q10"]
+    _Q90: float = _pi["residual_quantiles_log"]["q90"]
+    _PI_COVERAGE: float = _pi["empirical_coverage"]
+    print(
+        f"Loaded prediction intervals from {_PI_PATH} "
+        f"(empirical coverage: {_PI_COVERAGE:.1%})"
+    )
+except FileNotFoundError:
+    print(f"Warning: Prediction interval summary not found at {_PI_PATH}")
+    _Q10, _Q90, _PI_COVERAGE = -0.0, 0.0, 0.0
 
 
 class PlayerFeatures(BaseModel):
@@ -45,6 +63,7 @@ class PredictionResponse(BaseModel):
     predicted_log_value: float
     predicted_value_eur: float
     confidence_interval: dict
+    interval_coverage: float
 
 
 @app.get("/")
@@ -63,7 +82,7 @@ def predict_player_value(features: PlayerFeatures):
         raise HTTPException(status_code=503, detail="Model not loaded")
 
     # Convert to DataFrame
-    df = pd.DataFrame([features.dict()])
+    df = pd.DataFrame([features.model_dump()])
 
     # Add derived features (similar to feature engineering)
     for window in ["w180", "w365"]:
@@ -91,14 +110,18 @@ def predict_player_value(features: PlayerFeatures):
     log_pred = model.predict(df)[0]
     value_pred = np.exp(log_pred)
 
-    # Simple confidence interval (placeholder - could be improved)
-    ci_lower = value_pred * 0.8
-    ci_upper = value_pred * 1.2
+    # Prediction interval: shift log prediction by residual quantiles,
+    # then back-transform to EUR. Quantiles were derived from training
+    # residuals and validated on held-out future data.
+    # See artifacts/prediction_interval_summary_v3.json for empirical coverage.
+    ci_lower = float(np.exp(log_pred + _Q10))
+    ci_upper = float(np.exp(log_pred + _Q90))
 
     return PredictionResponse(
         predicted_log_value=log_pred,
         predicted_value_eur=value_pred,
         confidence_interval={"lower": ci_lower, "upper": ci_upper},
+        interval_coverage=_PI_COVERAGE,
     )
 
 
