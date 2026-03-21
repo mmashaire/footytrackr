@@ -116,18 +116,22 @@ Install dependencies:
 
 ```bash
 pip install -r requirements.txt
+pip install -e ".[dev,api]"
 ```
 
-Build features and train model:
+Run the API with existing artifacts:
 
 ```bash
+uvicorn footytrackr.api:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Rebuild the full pipeline (feature versions + training + analysis):
+
+```bash
+python scripts/02_build_value_features.py
+python scripts/02_build_value_features_v2.py
 python scripts/02_build_value_features_v3.py
 python scripts/03_train_market_value.py
-```
-
-Run diagnostics and uncertainty workflows:
-
-```bash
 python scripts/06_error_analysis.py
 python scripts/07_bias_correction.py
 python scripts/08_groupwise_bias_correction.py
@@ -139,6 +143,12 @@ Optional: build local DuckDB for faster analysis:
 ```bash
 python scripts/04_build_duckdb.py
 ```
+
+## Security and public repo notes
+
+- Copy `.env.example` to `.env` and set your own values before running Docker.
+- `.env`, local data, model binaries, and DuckDB files are git-ignored.
+- No production credentials are stored in this repository.
 
 ## Tech stack
 
