@@ -31,3 +31,27 @@ artifacts/*.joblib
 
 # DuckDB database file
 *.duckdb
+
+# Local Copilot instruction file (private)
+.github/copilot-instructions.md
+
+# Test artifacts and coverage
+.coverage
+htmlcov/
+.pytest_cache/
+coverage.xml
+
+# IDE/Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Debug and temporary files
+inspect_model.py
+JOURNAL_*.txt
+
+# Miscellaneous local artifacts
+*.log
+*.tmp

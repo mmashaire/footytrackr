@@ -149,6 +149,139 @@ class TestPredictEndpoint:
             body["confidence_interval"]["lower"] < body["confidence_interval"]["upper"]
         )
 
+
+class TestInputValidation:
+    """Test that PlayerFeatures validators reject invalid inputs with clear errors."""
+
+    def _make_client_for_validation_test(self):
+        """Create a test client for validation tests."""
+        mock_model = MagicMock()
+        mock_model.predict.return_value = np.array([13.0])
+
+        import footytrackr.api as api_module
+
+        with (
+            patch.object(api_module, "model", mock_model),
+            patch.object(api_module, "_Q10", -1.43),
+            patch.object(api_module, "_Q90", 1.51),
+            patch.object(api_module, "_PI_COVERAGE", 0.8079),
+        ):
+            from footytrackr.api import app
+            return TestClient(app)
+
+    def test_rejects_negative_age(self):
+        client = self._make_client_for_validation_test()
+        payload = SAMPLE_PAYLOAD.copy()
+        payload["age"] = -5.0
+        response = client.post("/predict", json=payload)
+        assert response.status_code == 422
+
+    def test_rejects_age_too_high(self):
+        client = self._make_client_for_validation_test()
+        payload = SAMPLE_PAYLOAD.copy()
+        payload["age"] = 75.0
+        response = client.post("/predict", json=payload)
+        assert response.status_code == 422
+
+    def test_rejects_negative_games_played(self):
+        client = self._make_client_for_validation_test()
+        payload = SAMPLE_PAYLOAD.copy()
+        payload["w180_games_played"] = -1.0
+        response = client.post("/predict", json=payload)
+        assert response.status_code == 422
+
+    def test_rejects_negative_minutes_played(self):
+        client = self._make_client_for_validation_test()
+        payload = SAMPLE_PAYLOAD.copy()
+        payload["w365_minutes_played"] = -100.0
+        response = client.post("/predict", json=payload)
+        assert response.status_code == 422
+
+    def test_rejects_negative_goals(self):
+        client = self._make_client_for_validation_test()
+        payload = SAMPLE_PAYLOAD.copy()
+        payload["w180_goals"] = -3.0
+        response = client.post("/predict", json=payload)
+        assert response.status_code == 422
+
+    def test_rejects_negative_assists(self):
+        client = self._make_client_for_validation_test()
+        payload = SAMPLE_PAYLOAD.copy()
+        payload["w365_assists"] = -2.0
+        response = client.post("/predict", json=payload)
+        assert response.status_code == 422
+
+    def test_rejects_negative_cards(self):
+        client = self._make_client_for_validation_test()
+        payload = SAMPLE_PAYLOAD.copy()
+        payload["w180_yellow_cards"] = -1.0
+        response = client.post("/predict", json=payload)
+        assert response.status_code == 422
+
+    def test_rejects_empty_position(self):
+        client = self._make_client_for_validation_test()
+        payload = SAMPLE_PAYLOAD.copy()
+        payload["position"] = ""
+        response = client.post("/predict", json=payload)
+        assert response.status_code == 422
+
+    def test_rejects_empty_competition_id(self):
+        client = self._make_client_for_validation_test()
+        payload = SAMPLE_PAYLOAD.copy()
+        payload["player_club_domestic_competition_id"] = ""
+        response = client.post("/predict", json=payload)
+        assert response.status_code == 422
+
+    def test_accepts_zero_values(self):
+        """Zero is valid for most stats (player may have no minutes/goals yet)."""
+        mock_model = MagicMock()
+        mock_model.predict.return_value = np.array([10.0])
+
+        import footytrackr.api as api_module
+
+        with (
+            patch.object(api_module, "model", mock_model),
+            patch.object(api_module, "_Q10", -1.43),
+            patch.object(api_module, "_Q90", 1.51),
+            patch.object(api_module, "_PI_COVERAGE", 0.8079),
+        ):
+            from footytrackr.api import app
+            client = TestClient(app)
+            payload = SAMPLE_PAYLOAD.copy()
+            payload["w180_games_played"] = 0.0
+            payload["w180_goals"] = 0.0
+            payload["w365_minutes_played"] = 0.0
+            response = client.post("/predict", json=payload)
+            assert response.status_code == 200
+
+    def test_accepts_valid_age_boundaries(self):
+        """Test age boundaries (16 and 50 inclusive)."""
+        mock_model = MagicMock()
+        mock_model.predict.return_value = np.array([10.0])
+
+        import footytrackr.api as api_module
+
+        with (
+            patch.object(api_module, "model", mock_model),
+            patch.object(api_module, "_Q10", -1.43),
+            patch.object(api_module, "_Q90", 1.51),
+            patch.object(api_module, "_PI_COVERAGE", 0.8079),
+        ):
+            from footytrackr.api import app
+            client = TestClient(app)
+            
+            # Test age 16
+            payload = SAMPLE_PAYLOAD.copy()
+            payload["age"] = 16.0
+            response = client.post("/predict", json=payload)
+            assert response.status_code == 200
+            
+            # Test age 50
+            payload = SAMPLE_PAYLOAD.copy()
+            payload["age"] = 50.0
+            response = client.post("/predict", json=payload)
+            assert response.status_code == 200
+
     def test_predict_503_when_model_not_loaded(self):
         import footytrackr.api as api_module
 

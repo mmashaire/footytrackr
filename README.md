@@ -20,6 +20,18 @@ Most portfolio projects stop at model accuracy. I wanted to go further and show 
 
 This project reflects how I like to work: practical, transparent, and iterative.
 
+## Model Card
+
+For detailed documentation on model architecture, training data, performance, limitations, and ethics considerations, see **[MODELCARD.md](MODELCARD.md)**.
+
+Key points:
+
+- **Algorithm**: Ridge regression on log-transformed market value
+- **Training**: 396k samples (2003–2022); test on future data (2022–2025)
+- **Performance**: 34% better than baselines; ~€2.34M MAE; calibrated prediction intervals included
+- **Honest uncertainty**: Every prediction includes a 90% confidence interval
+- **Limitations documented**: Systematic optimism for high-value players, geographic bias, league-dependent performance
+
 ## What the project contains
 
 ### 1) Data pipeline
@@ -109,6 +121,7 @@ The model is not meant to be flashy. It is meant to be reliable, readable, and u
 - notebooks/: exploratory analysis
 - footytrackr/: API and package code
 - tests/: checks for feature-building logic
+- examples/: sample player JSON files for testing predictions
 
 ## How to run it
 
@@ -117,6 +130,39 @@ Install dependencies:
 ```bash
 pip install -r requirements.txt
 pip install -e ".[dev,api]"
+```
+
+Run the packaged CLI:
+
+```bash
+footytrackr build-features --version v3
+footytrackr train
+footytrackr test tests/test_api.py
+footytrackr api --reload
+```
+
+### Try a prediction
+
+Use pre-built example players or build your own JSON. Examples are in `examples/`:
+
+```bash
+# Young striker in English Premier League
+footytrackr predict --input-file examples/young_striker_gb1.json
+
+# Experienced midfielder in Spanish league
+footytrackr predict --input-file examples/experienced_midfielder_es1.json
+
+# Prospect winger in Luxembourg league
+footytrackr predict --input-file examples/young_winger_l1.json
+
+# Veteran defender in Italian league
+footytrackr predict --input-file examples/veteran_defender_it1.json
+```
+
+Or pass JSON inline:
+
+```bash
+footytrackr predict --json '{"age": 25, "position": "Centre-Forward", "w180_games_played": 15, "w180_minutes_played": 1200, "w180_goals": 8, "w180_assists": 3, "w180_yellow_cards": 2, "w180_red_cards": 0, "w365_games_played": 30, "w365_minutes_played": 2500, "w365_goals": 14, "w365_assists": 6, "w365_yellow_cards": 4, "w365_red_cards": 0, "player_club_domestic_competition_id": "GB1"}'
 ```
 
 Run the API with existing artifacts:
@@ -168,6 +214,17 @@ If you are reviewing this for hiring:
 - Engineers: scripts are versioned, artifacts are explicit, and decisions are traceable.
 
 I am happy to walk through design trade-offs, what I would productionize next, and what I would change with more time.
+
+## Contributing
+
+Interested in improving this project? See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on reporting issues, suggesting features, and submitting pull requests.
+
+The project welcomes thoughtful contributions that:
+
+- Strengthen reproducibility or documentation
+- Improve data engineering practices
+- Add tests or diagnostics
+- Fix bugs or security issues
 
 ## Disclaimer
 
