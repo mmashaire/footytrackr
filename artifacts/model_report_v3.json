@@ -1,0 +1,51 @@
+{
+  "model_version": "v3",
+  "generated_from": {
+    "error_summary": "error_analysis_summary_v3.json",
+    "interval_summary": "prediction_interval_summary_v3.json",
+    "error_by_position": "error_by_position_v3.csv",
+    "error_by_league": "error_by_league_v3.csv"
+  },
+  "overall": {
+    "n_test_rows": 99567,
+    "cutoff_date": "2022-05-18",
+    "mae_eur": 2344544.7528988994,
+    "median_abs_err_eur": 385456.82262873044,
+    "mean_signed_err_eur": -1652575.042717915,
+    "bias_direction": "underprediction",
+    "interval": "10\u201390%",
+    "target_coverage": 0.8,
+    "empirical_coverage": 0.8079685036206775,
+    "coverage_gap": 0.008
+  },
+  "top_position_risks": [
+    {
+      "group": "Other",
+      "samples": 28632,
+      "mae_eur": 2655350.9562864057,
+      "median_abs_err_eur": 451304.56890944974,
+      "mean_signed_err_eur": -1697067.3493638344
+    },
+    {
+      "group": "MID",
+      "samples": 28476,
+      "mae_eur": 2619002.1543560917,
+      "median_abs_err_eur": 429036.5074686371,
+      "mean_signed_err_eur": -1891357.887620472
+    },
+    {
+      "group": "DEF",
+      "samples": 31914,
+      "mae_eur": 2206905.60595112,
+      "median_abs_err_eur": 388185.1920077922,
+      "mean_signed_err_eur": -1663258.5948549618
+    }
+  ],
+  "top_league_risks": [],
+  "risk_flags": [
+    "Interval coverage is close to target, which is a good sign for calibration.",
+    "Average signed error stays negative, so the model is still underpricing players overall.",
+    "Highest position-level error is in Other profiles, so that subgroup deserves a closer look.",
+    "League breakdown is not yet very informative because the current artifact is mostly tagged as 'Unknown'."
+  ]
+}

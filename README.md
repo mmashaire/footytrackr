@@ -7,6 +7,16 @@ Footytrackr is a football analytics project I built to answer one practical ques
 Can we estimate player market value in a way that is simple, honest about uncertainty, and easy to explain?
 
 I used historical Transfermarkt data and treated this like a small real-world data product, not a one-off notebook. The focus is on clean pipelines, reproducible outputs, and decisions that can be defended.
+It also serves as a practical applied AI/ML portfolio piece: the emphasis is on interpretable modeling, honest uncertainty, and production-minded delivery rather than black-box hype.
+
+## Recent quality-focused updates
+
+A few recent improvements pushed this further toward a real portfolio-grade data product:
+
+- **Safer prediction API**: requests are validated for realistic age ranges, non-negative football stats, and non-empty identifiers.
+- **Consistent error handling**: invalid API payloads now return a stable JSON error shape instead of ad hoc failures.
+- **Model reporting workflow**: `footytrackr model-report` generates a compact reliability summary from saved evaluation artifacts.
+- **Test coverage for the new paths**: API, CLI, and reporting logic are all regression-tested.
 
 ## Why I built this
 
@@ -109,8 +119,23 @@ This is the part I consider most practical for real usage.
 - Context features add meaningful signal on top of pure performance stats
 - Bias from log back-transformation is real and quantifiable
 - Prediction intervals are well calibrated on held-out future data
+- The latest `v3` report shows **~EUR 2.34M MAE** with **80.8% empirical coverage** against an 80% target
 
 The model is not meant to be flashy. It is meant to be reliable, readable, and useful.
+
+## What to try first
+
+If you only spend five minutes with this repo, these are the best entry points:
+
+1. Run a player prediction with explanations:
+   ```bash
+   footytrackr predict --input-file examples/young_striker_gb1.json --explain --scout-assistant
+   ```
+2. Generate the monitoring-style model summary:
+   ```bash
+   footytrackr model-report
+   ```
+3. Open `artifacts/model_report_v3.md` for a compact reliability snapshot.
 
 ## Repository layout
 
@@ -137,6 +162,7 @@ Run the packaged CLI:
 ```bash
 footytrackr build-features --version v3
 footytrackr train
+footytrackr model-report
 footytrackr test tests/test_api.py
 footytrackr api --reload
 ```
@@ -165,10 +191,128 @@ Or pass JSON inline:
 footytrackr predict --json '{"age": 25, "position": "Centre-Forward", "w180_games_played": 15, "w180_minutes_played": 1200, "w180_goals": 8, "w180_assists": 3, "w180_yellow_cards": 2, "w180_red_cards": 0, "w365_games_played": 30, "w365_minutes_played": 2500, "w365_goals": 14, "w365_assists": 6, "w365_yellow_cards": 4, "w365_red_cards": 0, "player_club_domestic_competition_id": "GB1"}'
 ```
 
+Include local explainability output (top positive and negative drivers):
+
+```bash
+footytrackr predict --input-file examples/young_striker_gb1.json --explain
+```
+
+Run Scout Assistant mode for a plain-English scouting summary:
+
+```bash
+footytrackr predict --input-file examples/young_striker_gb1.json --scout-assistant
+```
+
+### Generate a model report
+
+For a recruiter-friendly summary of model reliability, run:
+
+```bash
+footytrackr model-report
+```
+
+This writes `artifacts/model_report_v3.json` and `artifacts/model_report_v3.md`, pulling together overall error, interval coverage, directional bias, and the highest-risk subgroups in one place.
+
+At the moment, the report surfaces a few useful realities instead of hiding them:
+
+- overall error is still material (about **EUR 2.34M MAE** on the held-out split)
+- interval coverage is close to the target (**80.8% vs 80.0%**)
+- the model still tends to **underpredict overall**
+- league-level analysis needs richer competition labels than the current `Unknown` heavy artifact
+
+### API validation notes
+
+Prediction requests are intentionally validated before they reach the model. The API rejects:
+
+- ages outside the 16-50 range
+- negative minutes, goals, assists, or cards
+- empty or whitespace-only categorical fields
+
+That keeps demo usage cleaner and makes the project feel more production-minded than a bare notebook wrapper.
+
+### Scout Assistant demo
+
+If you only read one output in this project, start with this. It combines point estimate, uncertainty, and model reasoning in one response.
+
+```bash
+footytrackr predict --input-file examples/young_striker_gb1.json --explain --scout-assistant
+```
+
+Example response (shape):
+
+```json
+{
+  "predicted_log_value": 13.04,
+  "predicted_value_eur": 460132.71,
+  "confidence_interval": {
+    "lower": 112345.89,
+    "upper": 987654.32
+  },
+  "interval_coverage": 0.8079,
+  "explanation": {
+    "baseline_log_value": 12.5,
+    "top_positive": [
+      {
+        "feature": "w180_goals",
+        "feature_value": 8.0,
+        "transformed_feature": "w180_goals",
+        "contribution_log": 0.9
+      }
+    ],
+    "top_negative": [
+      {
+        "feature": "age",
+        "feature_value": 25.0,
+        "transformed_feature": "age",
+        "contribution_log": -0.2
+      }
+    ]
+  },
+  "scout_assistant": {
+    "summary": "Estimated market value is EUR 460K with a 90% interval from EUR 112K to EUR 988K. This sits in the 'Development or depth option' tier with high uncertainty.",
+    "valuation_band": "Development or depth option",
+    "uncertainty_level": "high",
+    "confidence_note": "Treat this as a broad range estimate and rely on additional scouting evidence.",
+    "key_positives": ["w180_goals"],
+    "key_risks": ["age"]
+  }
+}
+```
+
 Run the API with existing artifacts:
 
 ```bash
 uvicorn footytrackr.api:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Request prediction explanations from the API by adding `explain=true`:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/predict?explain=true" \
+  -H "Content-Type: application/json" \
+  -d @examples/young_striker_gb1.json
+```
+
+PowerShell equivalent:
+
+```powershell
+$body = Get-Content .\examples\young_striker_gb1.json -Raw
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/predict?explain=true" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 8
+```
+
+Request Scout Assistant output by adding `scout_assistant=true`:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/predict?scout_assistant=true" \
+  -H "Content-Type: application/json" \
+  -d @examples/young_striker_gb1.json
+```
+
+PowerShell equivalent:
+
+```powershell
+$body = Get-Content .\examples\young_striker_gb1.json -Raw
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/predict?scout_assistant=true" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 8
 ```
 
 Rebuild the full pipeline (feature versions + training + analysis):
@@ -204,7 +348,7 @@ python scripts/04_build_duckdb.py
 - matplotlib
 - Jupyter
 
-No AutoML, no heavy framework dependency, and no black-box modeling choices in the core pipeline.
+No AutoML, no heavy framework dependency, and no black-box modeling choices in the core pipeline. The AI/ML signal here is applied and explainable, not performative.
 
 ## Notes for recruiters and engineers
 
@@ -212,6 +356,7 @@ If you are reviewing this for hiring:
 
 - Recruiters: this project shows ownership across data, modeling, evaluation, and communication.
 - Engineers: scripts are versioned, artifacts are explicit, and decisions are traceable.
+- AI/ML hiring managers: the project demonstrates applied machine learning with leakage-safe evaluation, calibration, uncertainty estimation, and an API that serves reproducible predictions.
 
 I am happy to walk through design trade-offs, what I would productionize next, and what I would change with more time.
 

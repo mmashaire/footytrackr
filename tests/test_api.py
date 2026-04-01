@@ -9,7 +9,13 @@ independently of the serialised model files.
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pandas as pd
 from fastapi.testclient import TestClient
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import Ridge
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 SAMPLE_PAYLOAD = {
     "age": 25.0,
@@ -47,6 +53,103 @@ def _make_client(log_pred: float = 13.0, q10: float = -1.43, q90: float = 1.51):
 
         client = TestClient(app)
         yield client, mock_model
+
+
+def _make_explainable_model():
+    """Create a small fitted pipeline with deterministic feature contributions."""
+    import footytrackr.api as api_module
+
+    alt_payload = SAMPLE_PAYLOAD.copy()
+    alt_payload.update(
+        {
+            "age": 34.0,
+            "position": "Goalkeeper",
+            "w180_goals": 0.0,
+            "w180_assists": 0.0,
+            "w180_minutes_played": 900.0,
+            "w365_goals": 1.0,
+            "w365_assists": 0.0,
+            "player_club_domestic_competition_id": "IT1",
+        }
+    )
+
+    row_one = api_module._build_prediction_frame(
+        api_module.PlayerFeatures.model_validate(SAMPLE_PAYLOAD)
+    )
+    row_two = api_module._build_prediction_frame(
+        api_module.PlayerFeatures.model_validate(alt_payload)
+    )
+    X = pd.concat([row_one, row_two], ignore_index=True)
+    y = np.array([13.0, 11.5])
+
+    numeric_features = X.select_dtypes(include=["number"]).columns.tolist()
+    categorical_features = X.select_dtypes(include=["object"]).columns.tolist()
+
+    pipeline = Pipeline(
+        steps=[
+            (
+                "preprocess",
+                ColumnTransformer(
+                    transformers=[
+                        (
+                            "num",
+                            Pipeline(
+                                steps=[
+                                    ("imputer", SimpleImputer(strategy="median")),
+                                    ("scaler", StandardScaler()),
+                                ]
+                            ),
+                            numeric_features,
+                        ),
+                        (
+                            "cat",
+                            Pipeline(
+                                steps=[
+                                    (
+                                        "imputer",
+                                        SimpleImputer(strategy="most_frequent"),
+                                    ),
+                                    (
+                                        "onehot",
+                                        OneHotEncoder(
+                                            handle_unknown="ignore",
+                                            sparse_output=False,
+                                        ),
+                                    ),
+                                ]
+                            ),
+                            categorical_features,
+                        ),
+                    ],
+                    remainder="drop",
+                ),
+            ),
+            ("ridge", Ridge(alpha=1.0)),
+        ]
+    )
+    pipeline.fit(X, y)
+
+    preprocessor = pipeline.named_steps["preprocess"]
+    feature_names = list(preprocessor.transformers_[0][2])
+    feature_names.extend(
+        preprocessor.transformers_[1][1]
+        .named_steps["onehot"]
+        .get_feature_names_out(preprocessor.transformers_[1][2])
+    )
+
+    coefficients = np.zeros(len(feature_names))
+    coefficients[feature_names.index("w180_goals")] = 0.9
+    coefficients[feature_names.index("age")] = 0.7
+    coefficients[feature_names.index("position_Centre-Forward")] = 0.4
+    coefficients[
+        feature_names.index("player_club_domestic_competition_id_GB1")
+    ] = 0.3
+
+    ridge = pipeline.named_steps["ridge"]
+    ridge.coef_ = coefficients
+    ridge.intercept_ = 13.0
+
+    return pipeline
 
 
 class TestHealthEndpoint:
@@ -149,6 +252,85 @@ class TestPredictEndpoint:
             body["confidence_interval"]["lower"] < body["confidence_interval"]["upper"]
         )
 
+    def test_predict_explanation_is_optional(self):
+        mock_model = MagicMock()
+        mock_model.predict.return_value = np.array([13.0])
+
+        import footytrackr.api as api_module
+
+        with (
+            patch.object(api_module, "model", mock_model),
+            patch.object(api_module, "_Q10", -1.43),
+            patch.object(api_module, "_Q90", 1.51),
+            patch.object(api_module, "_PI_COVERAGE", 0.8079),
+        ):
+            from footytrackr.api import app
+
+            client = TestClient(app)
+            body = client.post("/predict", json=SAMPLE_PAYLOAD).json()
+
+        assert body["explanation"] is None
+        assert body["scout_assistant"] is None
+
+    def test_predict_explanation_returns_feature_drivers(self):
+        explainable_model = _make_explainable_model()
+
+        import footytrackr.api as api_module
+
+        with (
+            patch.object(api_module, "model", explainable_model),
+            patch.object(api_module, "_Q10", -1.43),
+            patch.object(api_module, "_Q90", 1.51),
+            patch.object(api_module, "_PI_COVERAGE", 0.8079),
+        ):
+            from footytrackr.api import app
+
+            client = TestClient(app)
+            body = client.post("/predict?explain=true", json=SAMPLE_PAYLOAD).json()
+
+        explanation = body["explanation"]
+        assert explanation is not None
+        assert explanation["baseline_log_value"] == 13.0
+
+        positive_features = {item["feature"] for item in explanation["top_positive"]}
+        negative_features = {item["feature"] for item in explanation["top_negative"]}
+
+        assert "w180_goals" in positive_features
+        assert "position" in positive_features
+        assert "age" in negative_features
+
+    def test_predict_scout_assistant_returns_summary(self):
+        explainable_model = _make_explainable_model()
+
+        import footytrackr.api as api_module
+
+        with (
+            patch.object(api_module, "model", explainable_model),
+            patch.object(api_module, "_Q10", -1.43),
+            patch.object(api_module, "_Q90", 1.51),
+            patch.object(api_module, "_PI_COVERAGE", 0.8079),
+        ):
+            from footytrackr.api import app
+
+            client = TestClient(app)
+            body = client.post(
+                "/predict?scout_assistant=true",
+                json=SAMPLE_PAYLOAD,
+            ).json()
+
+        report = body["scout_assistant"]
+        assert report is not None
+        assert "Estimated market value is" in report["summary"]
+        assert report["valuation_band"] in {
+            "Development or depth option",
+            "Rotation-level asset",
+            "First-team starter profile",
+            "High-value starter",
+            "Elite market asset",
+        }
+        assert report["uncertainty_level"] in {"low", "medium", "high"}
+        assert "w180_goals" in report["key_positives"]
+
 
 class TestInputValidation:
     """Test that PlayerFeatures validators reject invalid inputs with clear errors."""
@@ -225,12 +407,32 @@ class TestInputValidation:
         response = client.post("/predict", json=payload)
         assert response.status_code == 422
 
+    def test_rejects_whitespace_only_position(self):
+        client = self._make_client_for_validation_test()
+        payload = SAMPLE_PAYLOAD.copy()
+        payload["position"] = "   "
+        response = client.post("/predict", json=payload)
+        body = response.json()
+
+        assert response.status_code == 422
+        assert body["error"]["type"] == "validation_error"
+
     def test_rejects_empty_competition_id(self):
         client = self._make_client_for_validation_test()
         payload = SAMPLE_PAYLOAD.copy()
         payload["player_club_domestic_competition_id"] = ""
         response = client.post("/predict", json=payload)
         assert response.status_code == 422
+
+    def test_rejects_whitespace_only_competition_id(self):
+        client = self._make_client_for_validation_test()
+        payload = SAMPLE_PAYLOAD.copy()
+        payload["player_club_domestic_competition_id"] = "   "
+        response = client.post("/predict", json=payload)
+        body = response.json()
+
+        assert response.status_code == 422
+        assert body["error"]["type"] == "validation_error"
 
     def test_accepts_zero_values(self):
         """Zero is valid for most stats (player may have no minutes/goals yet)."""
@@ -291,4 +493,25 @@ class TestInputValidation:
             client = TestClient(app, raise_server_exceptions=False)
             response = client.post("/predict", json=SAMPLE_PAYLOAD)
 
+        body = response.json()
+
         assert response.status_code == 503
+        assert body == {
+            "error": {
+                "type": "service_unavailable",
+                "message": "Model not loaded",
+            }
+        }
+
+    def test_validation_errors_use_consistent_error_shape(self):
+        client = self._make_client_for_validation_test()
+        payload = SAMPLE_PAYLOAD.copy()
+        payload["w180_goals"] = -1.0
+
+        response = client.post("/predict", json=payload)
+        body = response.json()
+
+        assert response.status_code == 422
+        assert body["error"]["type"] == "validation_error"
+        assert body["error"]["message"] == "Invalid request payload"
+        assert body["error"]["details"]

@@ -5,11 +5,14 @@ Footytrackr API - Simple REST API for player value predictions
 
 import json
 from pathlib import Path
+from typing import Any
 
 import joblib
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 
 app = FastAPI(title="Footytrackr API", version="0.1.0")
@@ -43,11 +46,12 @@ except FileNotFoundError:
 
 class PlayerFeatures(BaseModel):
     """Request schema for player value prediction.
-    
+
     All numeric fields are validated to be within realistic ranges for
     professional football players. The validation helps catch malformed
     input early with clear error messages.
     """
+
     age: float
     position: str
     w180_games_played: float
@@ -64,10 +68,21 @@ class PlayerFeatures(BaseModel):
     w365_red_cards: float
     player_club_domestic_competition_id: str
 
+    @staticmethod
+    def _validate_finite_non_negative(value: float, field_label: str) -> float:
+        """Reject NaN/inf values and negative football stats."""
+        if not np.isfinite(value):
+            raise ValueError(f"{field_label} must be a finite number")
+        if value < 0:
+            raise ValueError(f"{field_label} cannot be negative")
+        return value
+
     @field_validator("age")
     @classmethod
     def validate_age(cls, v: float) -> float:
-        """Age must be between 16 and 50."""
+        """Age must be a realistic value for a professional player."""
+        if not np.isfinite(v):
+            raise ValueError("Age must be a finite number")
         if not (16 <= v <= 50):
             raise ValueError("Age must be between 16 and 50")
         return v
@@ -75,10 +90,13 @@ class PlayerFeatures(BaseModel):
     @field_validator("position")
     @classmethod
     def validate_position(cls, v: str) -> str:
-        """Position must be a non-empty string."""
-        if not v or not isinstance(v, str):
+        """Position must contain a meaningful non-empty label."""
+        if not isinstance(v, str):
             raise ValueError("Position must be a non-empty string")
-        return v.strip()
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("Position must be a non-empty string")
+        return cleaned
 
     @field_validator(
         "w180_games_played",
@@ -86,10 +104,8 @@ class PlayerFeatures(BaseModel):
     )
     @classmethod
     def validate_games_played(cls, v: float) -> float:
-        """Games played must be non-negative."""
-        if v < 0:
-            raise ValueError("Games played cannot be negative")
-        return v
+        """Games played must be finite and non-negative."""
+        return cls._validate_finite_non_negative(v, "Games played")
 
     @field_validator(
         "w180_minutes_played",
@@ -97,10 +113,8 @@ class PlayerFeatures(BaseModel):
     )
     @classmethod
     def validate_minutes_played(cls, v: float) -> float:
-        """Minutes played must be non-negative."""
-        if v < 0:
-            raise ValueError("Minutes played cannot be negative")
-        return v
+        """Minutes played must be finite and non-negative."""
+        return cls._validate_finite_non_negative(v, "Minutes played")
 
     @field_validator(
         "w180_goals",
@@ -110,10 +124,8 @@ class PlayerFeatures(BaseModel):
     )
     @classmethod
     def validate_attacking_stats(cls, v: float) -> float:
-        """Goals and assists must be non-negative."""
-        if v < 0:
-            raise ValueError("Goals and assists cannot be negative")
-        return v
+        """Goals and assists must be finite and non-negative."""
+        return cls._validate_finite_non_negative(v, "Goals and assists")
 
     @field_validator(
         "w180_yellow_cards",
@@ -123,18 +135,19 @@ class PlayerFeatures(BaseModel):
     )
     @classmethod
     def validate_cards(cls, v: float) -> float:
-        """Cards must be non-negative integers."""
-        if v < 0:
-            raise ValueError("Cards cannot be negative")
-        return v
+        """Cards must be finite and non-negative."""
+        return cls._validate_finite_non_negative(v, "Cards")
 
     @field_validator("player_club_domestic_competition_id")
     @classmethod
     def validate_competition_id(cls, v: str) -> str:
-        """Competition ID must be a non-empty string."""
-        if not v or not isinstance(v, str):
+        """Competition ID must contain a meaningful non-empty label."""
+        if not isinstance(v, str):
             raise ValueError("Competition ID must be a non-empty string")
-        return v.strip()
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("Competition ID must be a non-empty string")
+        return cleaned
 
 
 class ConfidenceInterval(BaseModel):
@@ -143,16 +156,97 @@ class ConfidenceInterval(BaseModel):
     upper: float
 
 
+class FeatureContribution(BaseModel):
+    """A single feature contribution in log-value space."""
+
+    feature: str
+    feature_value: str | float | int | None
+    transformed_feature: str
+    contribution_log: float
+
+
+class PredictionExplanation(BaseModel):
+    """Top positive and negative drivers behind a prediction."""
+
+    baseline_log_value: float
+    top_positive: list[FeatureContribution]
+    top_negative: list[FeatureContribution]
+
+
+class ScoutAssistantReport(BaseModel):
+    """Decision-support summary for quick scouting interpretation."""
+
+    summary: str
+    valuation_band: str
+    uncertainty_level: str
+    confidence_note: str
+    key_positives: list[str]
+    key_risks: list[str]
+
+
 class PredictionResponse(BaseModel):
     """Response schema for player value prediction.
-    
+
     Includes point prediction, prediction interval with empirical coverage,
     and metadata about the interval estimation.
     """
+
     predicted_log_value: float
     predicted_value_eur: float
     confidence_interval: ConfidenceInterval
     interval_coverage: float
+    explanation: PredictionExplanation | None = None
+    scout_assistant: ScoutAssistantReport | None = None
+
+
+def _http_error_type(status_code: int) -> str:
+    """Map HTTP status codes to stable, API-friendly error identifiers."""
+    return {
+        400: "bad_request",
+        404: "not_found",
+        422: "validation_error",
+        503: "service_unavailable",
+    }.get(status_code, "http_error")
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
+    """Return request validation failures in a consistent JSON shape."""
+    details = []
+    for error in exc.errors():
+        location = [str(part) for part in error.get("loc", []) if part != "body"]
+        details.append(
+            {
+                "field": ".".join(location) if location else "body",
+                "message": error.get("msg", "Invalid value"),
+            }
+        )
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": {
+                "type": "validation_error",
+                "message": "Invalid request payload",
+                "details": details,
+            }
+        },
+    )
+
+
+@app.exception_handler(HTTPException)
+async def handle_http_error(_: Request, exc: HTTPException) -> JSONResponse:
+    """Return predictable error payloads for API clients and CLI callers."""
+    message = exc.detail if isinstance(exc.detail, str) else "Request failed"
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": {
+                "type": _http_error_type(exc.status_code),
+                "message": message,
+            }
+        },
+    )
 
 
 def _build_prediction_frame(features: PlayerFeatures) -> pd.DataFrame:
@@ -200,24 +294,235 @@ def _build_prediction_frame(features: PlayerFeatures) -> pd.DataFrame:
     return df.fillna(0)
 
 
-def predict_from_features(features: PlayerFeatures) -> PredictionResponse:
+def _get_transformed_feature_names() -> list[str]:
+    """Return fitted transformed feature names for the loaded pipeline."""
+    if model is None:
+        raise RuntimeError("Model not loaded")
+
+    preprocessor = model.named_steps["preprocess"]
+    names: list[str] = []
+
+    num_features = preprocessor.transformers_[0][2]
+    names.extend(list(num_features))
+
+    cat_pipeline = preprocessor.transformers_[1][1]
+    onehot = cat_pipeline.named_steps["onehot"]
+    cat_features = preprocessor.transformers_[1][2]
+    names.extend(list(onehot.get_feature_names_out(cat_features)))
+
+    return names
+
+
+def _parse_feature_value(
+    transformed_feature: str,
+    input_frame: pd.DataFrame,
+    categorical_features: list[str],
+) -> tuple[str, str | float | int | None]:
+    """Map a transformed feature back to a user-facing feature/value pair."""
+    if transformed_feature in input_frame.columns:
+        raw_value = input_frame.iloc[0][transformed_feature]
+        if isinstance(raw_value, np.generic):
+            raw_value = raw_value.item()
+        return transformed_feature, raw_value
+
+    for feature in sorted(categorical_features, key=len, reverse=True):
+        prefix = f"{feature}_"
+        if transformed_feature.startswith(prefix):
+            return feature, transformed_feature[len(prefix):]
+
+    return transformed_feature, None
+
+
+def _build_prediction_explanation(
+    input_frame: pd.DataFrame,
+    top_k: int = 3,
+) -> PredictionExplanation:
+    """Compute local feature contributions for a single prediction."""
+    if model is None:
+        raise RuntimeError("Model not loaded")
+
+    try:
+        preprocessor = model.named_steps["preprocess"]
+        ridge = model.named_steps["ridge"]
+        transformed_names = _get_transformed_feature_names()
+        transformed_row = np.asarray(preprocessor.transform(input_frame)).ravel()
+        contributions = transformed_row * ridge.coef_
+    except (AttributeError, KeyError, ValueError) as exc:
+        raise RuntimeError(
+            "Explanation is unavailable for the loaded model artifact"
+        ) from exc
+
+    if len(transformed_names) != len(contributions):
+        raise RuntimeError("Explanation is unavailable for the loaded model artifact")
+
+    categorical_features = list(preprocessor.transformers_[1][2])
+    contribution_frame = pd.DataFrame(
+        {
+            "transformed_feature": transformed_names,
+            "contribution_log": contributions,
+        }
+    )
+    contribution_frame["abs_contribution_log"] = contribution_frame[
+        "contribution_log"
+    ].abs()
+
+    positive_rows = contribution_frame[contribution_frame["contribution_log"] > 0]
+    negative_rows = contribution_frame[contribution_frame["contribution_log"] < 0]
+
+    def _serialize(rows: pd.DataFrame) -> list[FeatureContribution]:
+        out: list[FeatureContribution] = []
+        for transformed_feature, contribution in rows.nlargest(
+            top_k, "abs_contribution_log"
+        )[["transformed_feature", "contribution_log"]].itertuples(index=False):
+            feature, feature_value = _parse_feature_value(
+                transformed_feature,
+                input_frame,
+                categorical_features,
+            )
+            out.append(
+                FeatureContribution(
+                    feature=feature,
+                    feature_value=feature_value,
+                    transformed_feature=transformed_feature,
+                    contribution_log=float(contribution),
+                )
+            )
+        return out
+
+    baseline_log_value = ridge.intercept_
+    if isinstance(baseline_log_value, np.generic):
+        baseline_log_value = baseline_log_value.item()
+
+    return PredictionExplanation(
+        baseline_log_value=float(baseline_log_value),
+        top_positive=_serialize(positive_rows),
+        top_negative=_serialize(negative_rows),
+    )
+
+
+def _format_value_eur(value: float) -> str:
+    """Format a euro value for concise user-facing summaries."""
+    if value >= 1_000_000_000:
+        return f"EUR {value / 1_000_000_000:.2f}B"
+    if value >= 1_000_000:
+        return f"EUR {value / 1_000_000:.2f}M"
+    if value >= 1_000:
+        return f"EUR {value / 1_000:.0f}K"
+    return f"EUR {value:.0f}"
+
+
+def _valuation_band(predicted_value_eur: float) -> str:
+    """Bucket valuation into scouting-oriented market tiers."""
+    if predicted_value_eur < 2_000_000:
+        return "Development or depth option"
+    if predicted_value_eur < 10_000_000:
+        return "Rotation-level asset"
+    if predicted_value_eur < 30_000_000:
+        return "First-team starter profile"
+    if predicted_value_eur < 70_000_000:
+        return "High-value starter"
+    return "Elite market asset"
+
+
+def _uncertainty_level(
+    predicted_value_eur: float,
+    ci_lower: float,
+    ci_upper: float,
+) -> str:
+    """Classify interval width relative to point estimate."""
+    if predicted_value_eur <= 0:
+        return "high"
+
+    relative_width = (ci_upper - ci_lower) / predicted_value_eur
+    if relative_width < 1.5:
+        return "low"
+    if relative_width < 3.0:
+        return "medium"
+    return "high"
+
+
+def _build_scout_assistant_report(
+    predicted_value_eur: float,
+    ci_lower: float,
+    ci_upper: float,
+    explanation: PredictionExplanation,
+) -> ScoutAssistantReport:
+    """Create a plain-English scouting summary from model outputs."""
+    uncertainty_level = _uncertainty_level(predicted_value_eur, ci_lower, ci_upper)
+
+    confidence_note_by_level = {
+        "low": "Signal is relatively stable for this profile; use as a strong benchmark.",
+        "medium": "Signal is directionally useful, but pair with contract and scouting context.",
+        "high": "Treat this as a broad range estimate and rely on additional scouting evidence.",
+    }
+
+    key_positives = [item.feature for item in explanation.top_positive]
+    key_risks = [item.feature for item in explanation.top_negative]
+
+    summary = (
+        f"Estimated market value is {_format_value_eur(predicted_value_eur)} "
+        f"with a 90% interval from {_format_value_eur(ci_lower)} to "
+        f"{_format_value_eur(ci_upper)}. "
+        f"This sits in the '{_valuation_band(predicted_value_eur)}' tier "
+        f"with {uncertainty_level} uncertainty."
+    )
+
+    return ScoutAssistantReport(
+        summary=summary,
+        valuation_band=_valuation_band(predicted_value_eur),
+        uncertainty_level=uncertainty_level,
+        confidence_note=confidence_note_by_level[uncertainty_level],
+        key_positives=key_positives,
+        key_risks=key_risks,
+    )
+
+
+def predict_from_features(
+    features: PlayerFeatures,
+    include_explanation: bool = False,
+    include_scout_assistant: bool = False,
+) -> PredictionResponse:
     """Run a validated feature payload through the loaded model."""
     if model is None:
         raise RuntimeError("Model not loaded")
 
     df = _build_prediction_frame(features)
 
-    log_pred = model.predict(df)[0]
-    value_pred = np.exp(log_pred)
+    log_pred = float(model.predict(df)[0])
+    if not np.isfinite(log_pred):
+        raise RuntimeError("Model returned an invalid prediction")
 
+    value_pred = float(np.exp(log_pred))
     ci_lower = float(np.exp(log_pred + _Q10))
     ci_upper = float(np.exp(log_pred + _Q90))
+
+    if not all(np.isfinite(value) for value in (value_pred, ci_lower, ci_upper)):
+        raise RuntimeError("Prediction interval could not be computed")
+
+    ci_lower, ci_upper = sorted((ci_lower, ci_upper))
+
+    explanation = None
+    if include_explanation:
+        explanation = _build_prediction_explanation(df)
+
+    scout_assistant = None
+    if include_scout_assistant:
+        if explanation is None:
+            explanation = _build_prediction_explanation(df)
+        scout_assistant = _build_scout_assistant_report(
+            predicted_value_eur=float(value_pred),
+            ci_lower=ci_lower,
+            ci_upper=ci_upper,
+            explanation=explanation,
+        )
 
     return PredictionResponse(
         predicted_log_value=log_pred,
         predicted_value_eur=value_pred,
         confidence_interval=ConfidenceInterval(lower=ci_lower, upper=ci_upper),
         interval_coverage=_PI_COVERAGE,
+        explanation=explanation,
+        scout_assistant=scout_assistant,
     )
 
 
@@ -232,9 +537,17 @@ def health_check():
 
 
 @app.post("/predict", response_model=PredictionResponse)
-def predict_player_value(features: PlayerFeatures):
+def predict_player_value(
+    features: PlayerFeatures,
+    explain: bool = False,
+    scout_assistant: bool = False,
+):
     try:
-        return predict_from_features(features)
+        return predict_from_features(
+            features,
+            include_explanation=explain,
+            include_scout_assistant=scout_assistant,
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 

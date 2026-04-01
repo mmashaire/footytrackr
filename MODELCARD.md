@@ -4,7 +4,7 @@
 
 ### Overview
 
-This is a Ridge regression model trained to estimate player market values from historical Transfermarkt football data. The model emphasizes interpretability, uncertainty quantification, and honest performance reporting over black-box optimization.
+This is a Ridge regression model trained to estimate player market values from historical Transfermarkt football data. The model emphasizes interpretability, uncertainty quantification, and honest performance reporting over black-box optimization. In portfolio terms, it is meant to demonstrate applied AI/ML skills that are practical, reproducible, and easy to defend.
 
 ### Algorithm
 
@@ -38,7 +38,7 @@ This is a Ridge regression model trained to estimate player market values from h
 1. **Market valuation benchmarking**: Quick reference point for player value in the €500k–€100M range
 2. **Portfolio analysis**: Comparing estimated vs. actual values to identify over/under-valued transfermarket deals
 3. **Player evaluation**: Supporting workflows where interpretable, explainable estimates are preferred
-4. **Portfolio education**: Demonstrating leakage-safe ML, time-based splits, calibration analysis, and bias correction
+4. **Portfolio education**: Demonstrating applied AI/ML through leakage-safe modeling, time-based splits, calibration analysis, bias correction, and uncertainty-aware prediction
 
 ### Out-of-Scope Uses
 
@@ -201,25 +201,56 @@ Experimental corrections tested:
 {
   "age": 25,
   "position": "Centre-Forward",
-  "games_played": 15,
-  "minutes_played": 900,
-  "goals": 5,
-  "assists": 2,
-  "cards": 1,
-  "competition_id": "GB1"
+  "w180_games_played": 15,
+  "w180_minutes_played": 1200,
+  "w180_goals": 8,
+  "w180_assists": 3,
+  "w180_yellow_cards": 2,
+  "w180_red_cards": 0,
+  "w365_games_played": 30,
+  "w365_minutes_played": 2500,
+  "w365_goals": 14,
+  "w365_assists": 6,
+  "w365_yellow_cards": 4,
+  "w365_red_cards": 0,
+  "player_club_domestic_competition_id": "GB1"
 }
 ```
+
+Optional query parameter:
+
+- `explain=true`: include top positive and negative feature contributions in log-value space
 
 **Response** (JSON):
 
 ```json
 {
+  "predicted_log_value": 13.0,
   "predicted_value_eur": 12500000,
   "confidence_interval": {
-    "lower_90": 2100000,
-    "upper_90": 32000000
+    "lower": 2100000,
+    "upper": 32000000
   },
-  "log_scale_prediction": 9.43
+  "interval_coverage": 0.88,
+  "explanation": {
+    "baseline_log_value": 12.5,
+    "top_positive": [
+      {
+        "feature": "w180_goals",
+        "feature_value": 8,
+        "transformed_feature": "w180_goals",
+        "contribution_log": 0.9
+      }
+    ],
+    "top_negative": [
+      {
+        "feature": "age",
+        "feature_value": 25,
+        "transformed_feature": "age",
+        "contribution_log": -0.2
+      }
+    ]
+  }
 }
 ```
 

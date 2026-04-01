@@ -24,6 +24,7 @@ SCRIPT_COMMANDS = {
     "bias-correction": "scripts/07_bias_correction.py",
     "groupwise-bias-correction": "scripts/08_groupwise_bias_correction.py",
     "prediction-intervals": "scripts/09_prediction_intervals.py",
+    "model-report": "scripts/10_model_report.py",
 }
 
 
@@ -53,6 +54,7 @@ def _run_pipeline() -> int:
         SCRIPT_COMMANDS["bias-correction"],
         SCRIPT_COMMANDS["groupwise-bias-correction"],
         SCRIPT_COMMANDS["prediction-intervals"],
+        SCRIPT_COMMANDS["model-report"],
     ):
         _run_python_script(relative_path)
     return 0
@@ -70,14 +72,27 @@ def _run_api(host: str, port: int, reload: bool) -> int:
     return 0
 
 
-def _predict_payload(payload: dict) -> dict:
+def _predict_payload(
+    payload: dict,
+    include_explanation: bool = False,
+    include_scout_assistant: bool = False,
+) -> dict:
     from footytrackr.api import PlayerFeatures, predict_from_features
 
     features = PlayerFeatures.model_validate(payload)
-    return predict_from_features(features).model_dump()
+    return predict_from_features(
+        features,
+        include_explanation=include_explanation,
+        include_scout_assistant=include_scout_assistant,
+    ).model_dump()
 
 
-def _run_predict(raw_json: str | None, input_file: str | None) -> int:
+def _run_predict(
+    raw_json: str | None,
+    input_file: str | None,
+    explain: bool = False,
+    scout_assistant: bool = False,
+) -> int:
     if bool(raw_json) == bool(input_file):
         print(
             "Provide exactly one of --json or --input-file for predict.",
@@ -91,7 +106,11 @@ def _run_predict(raw_json: str | None, input_file: str | None) -> int:
         else:
             payload = json.loads(raw_json)
 
-        prediction = _predict_payload(payload)
+        prediction = _predict_payload(
+            payload,
+            include_explanation=explain,
+            include_scout_assistant=scout_assistant,
+        )
     except FileNotFoundError as exc:
         print(f"Prediction input file not found: {exc.filename}", file=sys.stderr)
         return 1
@@ -167,6 +186,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--input-file",
         help="Path to a JSON file matching the API request schema.",
     )
+    predict.add_argument(
+        "--explain",
+        action="store_true",
+        help="Include top positive and negative feature contributions.",
+    )
+    predict.add_argument(
+        "--scout-assistant",
+        action="store_true",
+        help="Include a scouting-oriented summary with valuation tier and risk level.",
+    )
 
     test = subparsers.add_parser("test", help="Run pytest.")
     test.add_argument(
@@ -181,7 +210,14 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.set_defaults(handler=lambda args: _run_pipeline())
     build_features.set_defaults(handler=lambda args: _run_feature_chain(args.version))
     api.set_defaults(handler=lambda args: _run_api(args.host, args.port, args.reload))
-    predict.set_defaults(handler=lambda args: _run_predict(args.raw_json, args.input_file))
+    predict.set_defaults(
+        handler=lambda args: _run_predict(
+            args.raw_json,
+            args.input_file,
+            explain=args.explain,
+            scout_assistant=args.scout_assistant,
+        )
+    )
     test.set_defaults(handler=lambda args: _run_tests(args.pytest_args))
 
     for command_name, relative_path in SCRIPT_COMMANDS.items():
