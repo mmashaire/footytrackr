@@ -38,6 +38,7 @@ dev = [
     "isort>=5.10.0",
     "mypy>=0.950",
     "flake8>=4.0.0",
+    "pandas-stubs>=1.5.0",
 ]
 api = [
     "fastapi>=0.68.0",
@@ -66,3 +67,14 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+exclude = ["_pytest", ".venv", "venv"]
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = "joblib"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "footytrackr.api"
+disallow_untyped_decorators = false
+disable_error_code = ["misc"]

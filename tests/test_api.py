@@ -141,9 +141,7 @@ def _make_explainable_model():
     coefficients[feature_names.index("w180_goals")] = 0.9
     coefficients[feature_names.index("age")] = 0.7
     coefficients[feature_names.index("position_Centre-Forward")] = 0.4
-    coefficients[
-        feature_names.index("player_club_domestic_competition_id_GB1")
-    ] = 0.3
+    coefficients[feature_names.index("player_club_domestic_competition_id_GB1")] = 0.3
 
     ridge = pipeline.named_steps["ridge"]
     ridge.coef_ = coefficients
@@ -349,6 +347,7 @@ class TestInputValidation:
             patch.object(api_module, "_PI_COVERAGE", 0.8079),
         ):
             from footytrackr.api import app
+
             return TestClient(app)
 
     def test_rejects_negative_age(self):
@@ -448,6 +447,7 @@ class TestInputValidation:
             patch.object(api_module, "_PI_COVERAGE", 0.8079),
         ):
             from footytrackr.api import app
+
             client = TestClient(app)
             payload = SAMPLE_PAYLOAD.copy()
             payload["w180_games_played"] = 0.0
@@ -470,14 +470,15 @@ class TestInputValidation:
             patch.object(api_module, "_PI_COVERAGE", 0.8079),
         ):
             from footytrackr.api import app
+
             client = TestClient(app)
-            
+
             # Test age 16
             payload = SAMPLE_PAYLOAD.copy()
             payload["age"] = 16.0
             response = client.post("/predict", json=payload)
             assert response.status_code == 200
-            
+
             # Test age 50
             payload = SAMPLE_PAYLOAD.copy()
             payload["age"] = 50.0

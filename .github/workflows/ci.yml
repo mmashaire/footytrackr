@@ -30,6 +30,9 @@ jobs:
       - name: Check import order (isort)
         run: isort --check-only footytrackr/ tests/
 
+      - name: Check type safety (mypy)
+        run: mypy footytrackr/ --strict
+
       - name: Lint (flake8)
         # Scope to package + tests only; scripts/ has numeric-prefix filenames
         # and is excluded from production lint. max-line-length matches black.

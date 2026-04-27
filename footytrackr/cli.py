@@ -5,9 +5,9 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, Optional
 
 from pydantic import ValidationError
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -73,23 +73,26 @@ def _run_api(host: str, port: int, reload: bool) -> int:
 
 
 def _predict_payload(
-    payload: dict,
+    payload: dict[str, Any],
     include_explanation: bool = False,
     include_scout_assistant: bool = False,
-) -> dict:
+) -> dict[str, Any]:
     from footytrackr.api import PlayerFeatures, predict_from_features
 
     features = PlayerFeatures.model_validate(payload)
-    return predict_from_features(
+    result = predict_from_features(
         features,
         include_explanation=include_explanation,
         include_scout_assistant=include_scout_assistant,
     ).model_dump()
+    if not isinstance(result, dict):
+        raise RuntimeError("model_dump() did not return a dict")
+    return result
 
 
 def _run_predict(
-    raw_json: str | None,
-    input_file: str | None,
+    raw_json: Optional[str],
+    input_file: Optional[str],
     explain: bool = False,
     scout_assistant: bool = False,
 ) -> int:
@@ -102,8 +105,11 @@ def _run_predict(
 
     try:
         if input_file is not None:
-            payload = json.loads(Path(input_file).read_text(encoding="utf-8"))
+            payload: dict[str, Any] = json.loads(
+                Path(input_file).read_text(encoding="utf-8")
+            )
         else:
+            assert raw_json is not None
             payload = json.loads(raw_json)
 
         prediction = _predict_payload(

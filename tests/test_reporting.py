@@ -7,7 +7,6 @@ import pandas as pd
 
 from footytrackr.reporting import build_model_report, render_model_report_markdown
 
-
 MODEL_VERSION = "v3"
 
 
@@ -45,15 +44,39 @@ def _write_artifacts(base_dir: Path) -> None:
 
     pd.DataFrame(
         [
-            {"position_bucket": "MID", "n": 40, "mae_eur": 3_100_000.0, "median_abs_err": 500_000.0, "mean_signed_err": -2_000_000.0},
-            {"position_bucket": "FWD", "n": 35, "mae_eur": 2_800_000.0, "median_abs_err": 450_000.0, "mean_signed_err": -1_500_000.0},
-            {"position_bucket": "GK", "n": 20, "mae_eur": 900_000.0, "median_abs_err": 120_000.0, "mean_signed_err": -300_000.0},
+            {
+                "position_bucket": "MID",
+                "n": 40,
+                "mae_eur": 3_100_000.0,
+                "median_abs_err": 500_000.0,
+                "mean_signed_err": -2_000_000.0,
+            },
+            {
+                "position_bucket": "FWD",
+                "n": 35,
+                "mae_eur": 2_800_000.0,
+                "median_abs_err": 450_000.0,
+                "mean_signed_err": -1_500_000.0,
+            },
+            {
+                "position_bucket": "GK",
+                "n": 20,
+                "mae_eur": 900_000.0,
+                "median_abs_err": 120_000.0,
+                "mean_signed_err": -300_000.0,
+            },
         ]
     ).to_csv(base_dir / f"error_by_position_{MODEL_VERSION}.csv", index=False)
 
     pd.DataFrame(
         [
-            {"domestic_competition_id": "Unknown", "n": 120, "mae_eur": 2_450_000.0, "median_abs_err": 410_000.0, "mean_signed_err": -1_250_000.0}
+            {
+                "domestic_competition_id": "Unknown",
+                "n": 120,
+                "mae_eur": 2_450_000.0,
+                "median_abs_err": 410_000.0,
+                "mean_signed_err": -1_250_000.0,
+            }
         ]
     ).to_csv(base_dir / f"error_by_league_{MODEL_VERSION}.csv", index=False)
 

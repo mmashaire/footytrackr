@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -19,7 +19,10 @@ def _load_json_artifact(path: Path) -> dict[str, Any]:
         )
 
     with path.open(encoding="utf-8") as handle:
-        return json.load(handle)
+        data = json.load(handle)
+        if not isinstance(data, dict):
+            raise ValueError(f"Artifact is not a JSON object: {path}")
+        return data
 
 
 def _load_csv_artifact(path: Path) -> pd.DataFrame:
@@ -69,10 +72,10 @@ def _prepare_group_rows(
     if frame.empty:
         return []
 
-    working = frame.copy()
+    working: pd.DataFrame = frame.copy()
     if exclude_unknown:
         unknown_mask = working[group_column].astype(str).str.lower().eq("unknown")
-        working = working.loc[~unknown_mask]
+        working = working.loc[~unknown_mask]  # type: ignore[assignment]
 
     if working.empty:
         return []
@@ -88,7 +91,9 @@ def _prepare_group_rows(
         else "mean_signed_err"
     )
 
-    ordered = working.sort_values(["mae_eur", "n"], ascending=[False, False]).head(top_n)
+    ordered = working.sort_values(["mae_eur", "n"], ascending=[False, False]).head(
+        top_n
+    )
 
     rows: list[dict[str, Any]] = []
     for record in ordered.to_dict(orient="records"):
@@ -106,7 +111,7 @@ def _prepare_group_rows(
 
 def build_model_report(
     model_version: str = DEFAULT_MODEL_VERSION,
-    artifacts_dir: Path | None = None,
+    artifacts_dir: Optional[Path] = None,
 ) -> dict[str, Any]:
     """Build a concise monitoring-style summary from saved evaluation artifacts."""
     artifact_root = artifacts_dir or ARTIFACTS_DIR
@@ -117,8 +122,12 @@ def build_model_report(
     interval_summary = _load_json_artifact(
         artifact_root / f"prediction_interval_summary_{model_version}.json"
     )
-    by_position = _load_csv_artifact(artifact_root / f"error_by_position_{model_version}.csv")
-    by_league = _load_csv_artifact(artifact_root / f"error_by_league_{model_version}.csv")
+    by_position = _load_csv_artifact(
+        artifact_root / f"error_by_position_{model_version}.csv"
+    )
+    by_league = _load_csv_artifact(
+        artifact_root / f"error_by_league_{model_version}.csv"
+    )
 
     mae_eur = float(error_summary["mae_eur"])
     mean_signed_err_eur = float(error_summary["mean_signed_err_eur"])
@@ -256,7 +265,9 @@ def write_model_report(
     artifact_root = artifacts_dir or ARTIFACTS_DIR
     artifact_root.mkdir(parents=True, exist_ok=True)
 
-    report = build_model_report(model_version=model_version, artifacts_dir=artifact_root)
+    report = build_model_report(
+        model_version=model_version, artifacts_dir=artifact_root
+    )
     json_path = artifact_root / f"model_report_{model_version}.json"
     markdown_path = artifact_root / f"model_report_{model_version}.md"
 

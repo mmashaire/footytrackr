@@ -3,9 +3,11 @@
 Footytrackr API - Simple REST API for player value predictions
 """
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Union
 
 import joblib
 import numpy as np
@@ -152,6 +154,7 @@ class PlayerFeatures(BaseModel):
 
 class ConfidenceInterval(BaseModel):
     """Prediction interval bounds in EUR."""
+
     lower: float
     upper: float
 
@@ -160,7 +163,7 @@ class FeatureContribution(BaseModel):
     """A single feature contribution in log-value space."""
 
     feature: str
-    feature_value: str | float | int | None
+    feature_value: Union[str, float, int, None]
     transformed_feature: str
     contribution_log: float
 
@@ -195,8 +198,8 @@ class PredictionResponse(BaseModel):
     predicted_value_eur: float
     confidence_interval: ConfidenceInterval
     interval_coverage: float
-    explanation: PredictionExplanation | None = None
-    scout_assistant: ScoutAssistantReport | None = None
+    explanation: Optional[PredictionExplanation] = None
+    scout_assistant: Optional[ScoutAssistantReport] = None
 
 
 def _http_error_type(status_code: int) -> str:
@@ -210,7 +213,9 @@ def _http_error_type(status_code: int) -> str:
 
 
 @app.exception_handler(RequestValidationError)
-async def handle_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
+async def handle_validation_error(
+    _: Request, exc: RequestValidationError
+) -> JSONResponse:
     """Return request validation failures in a consistent JSON shape."""
     details = []
     for error in exc.errors():
@@ -251,7 +256,7 @@ async def handle_http_error(_: Request, exc: HTTPException) -> JSONResponse:
 
 def _build_prediction_frame(features: PlayerFeatures) -> pd.DataFrame:
     """Convert validated request features into a model-ready dataframe.
-    
+
     Fills in missing contextual fields (height, citizenship, position details)
     with appropriate defaults so the model pipeline can handle them.
     The model was trained with these fields but they're not part of the
@@ -263,7 +268,7 @@ def _build_prediction_frame(features: PlayerFeatures) -> pd.DataFrame:
     # Add missing numeric fields (will be median-imputed by the pipeline)
     df["current_club_id"] = np.nan
     df["height_in_cm"] = np.nan
-    
+
     # Add missing categorical fields (will use most-frequent imputation)
     # Use empty string as sentinel; the imputer will replace with most-frequent value
     df["height_bucket"] = ""
@@ -280,7 +285,7 @@ def _build_prediction_frame(features: PlayerFeatures) -> pd.DataFrame:
         yellow = df[f"{window}_yellow_cards"]
         red = df[f"{window}_red_cards"]
 
-        nineties = minutes / 90.0
+        nineties: pd.Series[Any] = minutes / 90.0
         df[f"{window}_goals_per90"] = goals / nineties.replace(0, np.nan)
         df[f"{window}_assists_per90"] = assists / nineties.replace(0, np.nan)
         df[f"{window}_g_plus_a_per90"] = (goals + assists) / nineties.replace(0, np.nan)
@@ -328,7 +333,7 @@ def _parse_feature_value(
     for feature in sorted(categorical_features, key=len, reverse=True):
         prefix = f"{feature}_"
         if transformed_feature.startswith(prefix):
-            return feature, transformed_feature[len(prefix):]
+            return feature, transformed_feature[len(prefix) :]
 
     return transformed_feature, None
 
@@ -366,8 +371,12 @@ def _build_prediction_explanation(
         "contribution_log"
     ].abs()
 
-    positive_rows = contribution_frame[contribution_frame["contribution_log"] > 0]
-    negative_rows = contribution_frame[contribution_frame["contribution_log"] < 0]
+    positive_rows: pd.DataFrame = contribution_frame[  # type: ignore[assignment]
+        contribution_frame["contribution_log"] > 0
+    ]
+    negative_rows: pd.DataFrame = contribution_frame[  # type: ignore[assignment]
+        contribution_frame["contribution_log"] < 0
+    ]
 
     def _serialize(rows: pd.DataFrame) -> list[FeatureContribution]:
         out: list[FeatureContribution] = []
@@ -527,12 +536,14 @@ def predict_from_features(
 
 
 @app.get("/")
-def read_root():
+def read_root() -> dict[str, str]:
+    """Serve API root endpoint with welcome message."""
     return {"message": "Welcome to Footytrackr API", "version": "0.1.0"}
 
 
 @app.get("/health")
-def health_check():
+def health_check() -> dict[str, Any]:
+    """Check if API and model are healthy and ready."""
     return {"status": "healthy", "model_loaded": model is not None}
 
 
@@ -541,7 +552,8 @@ def predict_player_value(
     features: PlayerFeatures,
     explain: bool = False,
     scout_assistant: bool = False,
-):
+) -> PredictionResponse:
+    """Predict player market value from validated features."""
     try:
         return predict_from_features(
             features,
