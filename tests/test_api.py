@@ -151,13 +151,90 @@ def _make_explainable_model():
 
 
 class TestHealthEndpoint:
-    def test_health_returns_200(self):
-        from footytrackr.api import app
+    def test_health_returns_200_when_model_healthy(self):
+        """Health check returns 200 with healthy status when all artifacts are loaded."""
+        mock_model = MagicMock()
+        mock_model.predict.return_value = np.array([13.0])
 
-        client = TestClient(app)
-        response = client.get("/health")
+        import footytrackr.api as api_module
+
+        with (
+            patch.object(api_module, "model", mock_model),
+            patch.object(api_module, "_Q10", -1.43),
+            patch.object(api_module, "_Q90", 1.51),
+            patch.object(api_module, "_PI_COVERAGE", 0.8079),
+        ):
+            from footytrackr.api import app
+
+            client = TestClient(app)
+            response = client.get("/health")
+
         assert response.status_code == 200
-        assert "model_loaded" in response.json()
+        data = response.json()
+        assert data["status"] == "healthy"
+        assert data["model_loaded"] is True
+
+    def test_health_returns_unhealthy_when_model_not_loaded(self):
+        """Health check returns unhealthy status when model is None."""
+        import footytrackr.api as api_module
+
+        with patch.object(api_module, "model", None):
+            from footytrackr.api import app
+
+            client = TestClient(app)
+            response = client.get("/health")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "unhealthy"
+        assert data["reason"] == "model_not_loaded"
+
+    def test_health_returns_unhealthy_when_prediction_intervals_invalid(self):
+        """Health check fails when prediction interval quantiles are not finite."""
+        mock_model = MagicMock()
+        mock_model.predict.return_value = np.array([13.0])
+
+        import footytrackr.api as api_module
+
+        # Test with invalid Q10 (NaN)
+        with (
+            patch.object(api_module, "model", mock_model),
+            patch.object(api_module, "_Q10", np.nan),
+            patch.object(api_module, "_Q90", 1.51),
+            patch.object(api_module, "_PI_COVERAGE", 0.8079),
+        ):
+            from footytrackr.api import app
+
+            client = TestClient(app)
+            response = client.get("/health")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "unhealthy"
+        assert data["reason"] == "prediction_intervals_not_loaded"
+
+    def test_health_returns_unhealthy_when_prediction_fails(self):
+        """Health check fails when model prediction raises an exception."""
+        mock_model = MagicMock()
+        mock_model.predict.side_effect = RuntimeError("Prediction pipeline broken")
+
+        import footytrackr.api as api_module
+
+        with (
+            patch.object(api_module, "model", mock_model),
+            patch.object(api_module, "_Q10", -1.43),
+            patch.object(api_module, "_Q90", 1.51),
+            patch.object(api_module, "_PI_COVERAGE", 0.8079),
+        ):
+            from footytrackr.api import app
+
+            client = TestClient(app)
+            response = client.get("/health")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "unhealthy"
+        assert data["reason"] == "model_prediction_failed"
 
 
 class TestPredictEndpoint:

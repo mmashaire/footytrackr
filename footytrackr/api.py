@@ -543,8 +543,49 @@ def read_root() -> dict[str, str]:
 
 @app.get("/health")
 def health_check() -> dict[str, Any]:
-    """Check if API and model are healthy and ready."""
-    return {"status": "healthy", "model_loaded": model is not None}
+    """Check if API and model are healthy and ready.
+    
+    Validates that:
+    - Model artifact loads successfully
+    - Prediction interval artifacts are available
+    - Model can produce a valid test prediction
+    
+    Returns "unhealthy" if any check fails, with specific reason.
+    """
+    if model is None:
+        return {"status": "unhealthy", "reason": "model_not_loaded"}
+    
+    if _PI_COVERAGE <= 0 or not np.isfinite(_Q10) or not np.isfinite(_Q90):
+        return {"status": "unhealthy", "reason": "prediction_intervals_not_loaded"}
+    
+    # Verify model can actually make a prediction with a minimal valid input
+    try:
+        test_features = PlayerFeatures(
+            age=25.0,
+            position="Midfielder",
+            w180_games_played=10.0,
+            w180_minutes_played=900.0,
+            w180_goals=2.0,
+            w180_assists=3.0,
+            w180_yellow_cards=1.0,
+            w180_red_cards=0.0,
+            w365_games_played=30.0,
+            w365_minutes_played=2700.0,
+            w365_goals=8.0,
+            w365_assists=10.0,
+            w365_yellow_cards=3.0,
+            w365_red_cards=0.0,
+            player_club_domestic_competition_id="gb1",
+        )
+        _ = predict_from_features(test_features, include_explanation=False)
+    except Exception as exc:
+        return {
+            "status": "unhealthy",
+            "reason": "model_prediction_failed",
+            "detail": str(exc),
+        }
+    
+    return {"status": "healthy", "model_loaded": True}
 
 
 @app.post("/predict", response_model=PredictionResponse)

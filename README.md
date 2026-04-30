@@ -186,6 +186,13 @@ Start the server:
 uvicorn footytrackr.api:app --host 0.0.0.0 --port 8000 --reload
 ```
 
+**Health check** (validates model & prediction intervals are ready):
+```bash
+curl http://localhost:8000/health
+# Returns {"status": "healthy", "model_loaded": true}
+# Or {"status": "unhealthy", "reason": "model_not_loaded"} if artifacts missing
+```
+
 Request with explanations:
 ```bash
 curl -X POST "http://localhost:8000/predict?explain=true&scout_assistant=true" \
