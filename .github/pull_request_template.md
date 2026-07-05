@@ -1,27 +1,22 @@
-## Description
+## Summary
 
-What does this PR do? Link any related issues (#123).
+What changed and why does it matter for this project?
 
-## Type of Change
+## Scope
 
 - [ ] Bug fix
-- [ ] New feature
+- [ ] Reliability improvement
 - [ ] Documentation update
-- [ ] Code refactor
-- [ ] Test addition/improvement
+- [ ] Test improvement
+- [ ] Small refactor
 
-## How Has This Been Tested?
+## Validation
 
-Describe the tests you've run.
+List the checks you ran, for example:
+- `pytest tests/test_api.py tests/test_cli.py`
+- `black footytrackr/ tests/`
+- `flake8 footytrackr/ tests/ --max-line-length=88`
 
-## Checklist
+## Notes
 
-- [ ] Code follows the project's style guidelines (black, isort, flake8)
-- [ ] I've added tests for new functionality
-- [ ] I've updated relevant documentation (README, MODELCARD, docstrings)
-- [ ] All tests pass locally (`pytest tests/ -v`)
-- [ ] No new warnings or errors in linting
-
-## Notes for Reviewers
-
-Any context or decisions that might be useful for review?
+Call out any tradeoffs, risks, or follow-up work.
