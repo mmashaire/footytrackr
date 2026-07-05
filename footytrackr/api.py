@@ -19,8 +19,11 @@ from pydantic import BaseModel, field_validator
 
 app = FastAPI(title="Footytrackr API", version="0.1.0")
 
+PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+MODEL_PATH = PACKAGE_ROOT / "artifacts" / "ridge_model_v3.joblib"
+_PI_PATH = PACKAGE_ROOT / "artifacts" / "prediction_interval_summary_v3.json"
+
 # Load the trained model
-MODEL_PATH = Path("artifacts/ridge_model_v3.joblib")
 try:
     model = joblib.load(MODEL_PATH)
     print(f"Loaded model from {MODEL_PATH}")
@@ -30,7 +33,6 @@ except FileNotFoundError:
 
 # Load residual quantiles for prediction intervals
 # (computed by scripts/09_prediction_intervals.py)
-_PI_PATH = Path("artifacts/prediction_interval_summary_v3.json")
 try:
     with open(_PI_PATH) as f:
         _pi = json.load(f)

@@ -6,6 +6,7 @@ so we patch them with lightweight stubs so the endpoint logic is tested
 independently of the serialised model files.
 """
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -148,6 +149,14 @@ def _make_explainable_model():
     ridge.intercept_ = 13.0
 
     return pipeline
+
+
+def test_artifact_paths_are_resolved_from_package_root():
+    import footytrackr.api as api_module
+
+    repo_root = Path(__file__).resolve().parents[1]
+    assert api_module.MODEL_PATH == repo_root / "artifacts" / "ridge_model_v3.joblib"
+    assert api_module._PI_PATH == repo_root / "artifacts" / "prediction_interval_summary_v3.json"
 
 
 class TestHealthEndpoint:
