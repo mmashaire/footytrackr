@@ -80,6 +80,44 @@ def test_model_report_command_runs_script(monkeypatch):
     assert calls == [[sys.executable, str(cli.ROOT / "scripts/10_model_report.py")]]
 
 
+def test_run_health_reports_healthy_status(monkeypatch, capsys):
+    class DummyFeatures:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    fake_api = types.ModuleType("footytrackr.api")
+    fake_api.PlayerFeatures = DummyFeatures
+    fake_api._PI_COVERAGE = 0.8079
+    fake_api._Q10 = -1.43
+    fake_api._Q90 = 1.51
+    fake_api.model = object()
+    fake_api.predict_from_features = lambda features, include_explanation=False: {"ok": True}
+    monkeypatch.setitem(sys.modules, "footytrackr.api", fake_api)
+
+    exit_code = cli._run_health()
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "healthy"
+
+
+def test_run_health_reports_unhealthy_status(monkeypatch, capsys):
+    fake_api = types.ModuleType("footytrackr.api")
+    fake_api.PlayerFeatures = lambda **kwargs: None
+    fake_api._PI_COVERAGE = 0.0
+    fake_api._Q10 = float("nan")
+    fake_api._Q90 = 1.51
+    fake_api.model = None
+    fake_api.predict_from_features = lambda features, include_explanation=False: None
+    monkeypatch.setitem(sys.modules, "footytrackr.api", fake_api)
+
+    exit_code = cli._run_health()
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "unhealthy"
+
+
 def test_predict_command_prints_json(monkeypatch, capsys):
     monkeypatch.setattr(
         cli,

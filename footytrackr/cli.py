@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
+import numpy as np
 from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -88,6 +89,65 @@ def _predict_payload(
     if not isinstance(result, dict):
         raise RuntimeError("model_dump() did not return a dict")
     return result
+
+
+def _run_health() -> int:
+    try:
+        from footytrackr.api import (
+            PlayerFeatures,
+            _PI_COVERAGE,
+            _Q10,
+            _Q90,
+            model,
+            predict_from_features,
+        )
+    except ImportError as exc:
+        print(f"Health check failed to import the API module: {exc}", file=sys.stderr)
+        return 1
+
+    if model is None:
+        print(json.dumps({"status": "unhealthy", "reason": "model_not_loaded"}))
+        return 1
+
+    if _PI_COVERAGE <= 0 or not np.isfinite(_Q10) or not np.isfinite(_Q90):
+        print(
+            json.dumps({"status": "unhealthy", "reason": "prediction_intervals_not_loaded"})
+        )
+        return 1
+
+    try:
+        sample_features = PlayerFeatures(
+            age=25.0,
+            position="Midfielder",
+            w180_games_played=10.0,
+            w180_minutes_played=900.0,
+            w180_goals=2.0,
+            w180_assists=3.0,
+            w180_yellow_cards=1.0,
+            w180_red_cards=0.0,
+            w365_games_played=30.0,
+            w365_minutes_played=2700.0,
+            w365_goals=8.0,
+            w365_assists=10.0,
+            w365_yellow_cards=3.0,
+            w365_red_cards=0.0,
+            player_club_domestic_competition_id="gb1",
+        )
+        predict_from_features(sample_features, include_explanation=False)
+    except Exception as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "unhealthy",
+                    "reason": "model_prediction_failed",
+                    "detail": str(exc),
+                }
+            )
+        )
+        return 1
+
+    print(json.dumps({"status": "healthy", "model_loaded": True}))
+    return 0
 
 
 def _run_predict(
@@ -203,6 +263,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include a scouting-oriented summary with valuation tier and risk level.",
     )
 
+    health = subparsers.add_parser(
+        "health",
+        help="Check that the local prediction model and interval artifacts are ready.",
+    )
+
     test = subparsers.add_parser("test", help="Run pytest.")
     test.add_argument(
         "pytest_args",
@@ -224,6 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
             scout_assistant=args.scout_assistant,
         )
     )
+    health.set_defaults(handler=lambda args: _run_health())
     test.set_defaults(handler=lambda args: _run_tests(args.pytest_args))
 
     for command_name, relative_path in SCRIPT_COMMANDS.items():

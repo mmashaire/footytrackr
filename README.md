@@ -23,6 +23,7 @@ Using historical Transfermarkt data, I built this as a real-world data productâ€
 - **CI/CD pipeline**: Black, isort, mypy, and pytest on every push  
 - **Input validation**: API rejects unrealistic ages, negative stats, and empty fields  
 - **Consistent error handling**: Stable JSON error shapes; clear failure messages  
+- **Operational readiness checks**: A dedicated CLI health command now verifies model and interval artifacts before serving predictions  
 - **Docker support**: Reproducible environment; easy deployment
 
 ### Code Quality  
@@ -114,6 +115,20 @@ Each stage produces versioned outputs so you can audit and reproduce results.
 ```bash
 pip install -r requirements.txt
 pip install -e ".[dev,api]"
+```
+
+### Check Project Readiness (CLI)
+
+Before using the model locally, you can confirm the API, model artifact, and prediction interval files are all in a healthy state:
+
+```bash
+footytrackr health
+```
+
+A successful check returns a JSON payload like:
+
+```json
+{"status": "healthy", "model_loaded": true}
 ```
 
 ### Try a Prediction (CLI)
