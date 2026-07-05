@@ -2,11 +2,11 @@
 
 [![CI](https://github.com/mmashaire/footytrackr/actions/workflows/ci.yml/badge.svg)](https://github.com/mmashaire/footytrackr/actions/workflows/ci.yml)
 
-**A portfolio project demonstrating end-to-end data engineering, applied ML, and production software practices.**
+**A portfolio project showing how to build a reliable football valuation workflow with data engineering, interpretable ML, and production-minded software practices.**
 
 Footytrackr answers one practical question: *Can we estimate player market value in a way that is simple, reproducible, honest about uncertainty, and easy to explain?*
 
-Using historical Transfermarkt data, I built this as a real-world data product—not a notebook. The project emphasizes clean pipelines, reproducible artifacts, interpretable modeling, and decisions that hold up to scrutiny. Every component was designed to be production-ready and defensible in an interview.
+The project uses historical Transfermarkt data to build a transparent pipeline for feature engineering, training, evaluation, and prediction. It is designed to feel like a small real-world product rather than a notebook experiment.
 
 ## What This Project Demonstrates
 
