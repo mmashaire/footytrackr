@@ -156,12 +156,15 @@ def test_artifact_paths_are_resolved_from_package_root():
 
     repo_root = Path(__file__).resolve().parents[1]
     assert api_module.MODEL_PATH == repo_root / "artifacts" / "ridge_model_v3.joblib"
-    assert api_module._PI_PATH == repo_root / "artifacts" / "prediction_interval_summary_v3.json"
+    assert (
+        api_module._PI_PATH
+        == repo_root / "artifacts" / "prediction_interval_summary_v3.json"
+    )
 
 
 class TestHealthEndpoint:
     def test_health_returns_200_when_model_healthy(self):
-        """Health check returns 200 with healthy status when all artifacts are loaded."""
+        """Health check succeeds when all artifacts are loaded."""
         mock_model = MagicMock()
         mock_model.predict.return_value = np.array([13.0])
 
@@ -602,3 +605,237 @@ class TestInputValidation:
         assert body["error"]["type"] == "validation_error"
         assert body["error"]["message"] == "Invalid request payload"
         assert body["error"]["details"]
+
+
+class TestScoutEndpoint:
+    """Test the /scout/similar endpoint for finding undervalued players."""
+
+    def _make_scout_features_df(self) -> pd.DataFrame:
+        """Create a small scout features dataframe for testing."""
+        return pd.DataFrame(
+            {
+                "player_id": [1, 2, 3, 4, 5],
+                "name": [
+                    "Messi, Lionel",
+                    "Ronaldo, Cristiano",
+                    "Neymar Jr.",
+                    "Hazard, Eden",
+                    "Mbappé, Kylian",
+                ],
+                "date": pd.to_datetime(
+                    [
+                        "2025-04-06",
+                        "2025-04-06",
+                        "2025-04-06",
+                        "2025-04-06",
+                        "2025-04-06",
+                    ]
+                ),
+                "position": ["Forward", "Forward", "Forward", "Forward", "Forward"],
+                "age": [25.0, 24.0, 26.0, 25.0, 25.0],
+                "player_club_domestic_competition_id": [
+                    "ES1",
+                    "IT1",
+                    "FR1",
+                    "ES1",
+                    "FR1",
+                ],
+                "market_value_in_eur": [
+                    100_000_000.0,
+                    80_000_000.0,
+                    60_000_000.0,
+                    50_000_000.0,
+                    120_000_000.0,
+                ],
+                "w365_goals": [8.0, 10.0, 12.0, 4.0, 20.0],
+            }
+        )
+
+    def test_scout_similar_returns_correct_schema(self):
+        """Verify /scout/similar response has required fields."""
+        mock_model = MagicMock()
+        mock_model.feature_names_in_ = np.array(
+            [
+                "age",
+                "position",
+                "player_club_domestic_competition_id",
+                "w365_goals",
+            ]
+        )
+        mock_model.predict.side_effect = lambda frame: np.full(len(frame), 13.0)
+
+        import footytrackr.api as api_module
+
+        scout_features = self._make_scout_features_df()
+
+        with (
+            patch.object(api_module, "model", mock_model),
+            patch.object(api_module, "_scout_features", scout_features),
+            patch.object(api_module, "_Q10", -1.43),
+            patch.object(api_module, "_Q90", 1.51),
+            patch.object(api_module, "_PI_COVERAGE", 0.8079),
+        ):
+            from footytrackr.api import app
+
+            client = TestClient(app)
+            # Query with lowercase name as in lookup
+            response = client.get("/scout/similar?player=messi, lionel&n=3")
+
+        assert response.status_code == 200
+        body = response.json()
+
+        # Check response structure
+        assert "reference_player" in body
+        assert "reference_valuation_date" in body
+        assert "reference_position" in body
+        assert "reference_age" in body
+        assert "reference_market_value_eur" in body
+        assert "reference_predicted_value_eur" in body
+        assert "similar_undervalued" in body
+        assert "comparison_criteria" in body
+
+        # Check similar players list
+        assert isinstance(body["similar_undervalued"], list)
+        assert len(body["similar_undervalued"]) <= 3
+
+        # Check similar player fields
+        if body["similar_undervalued"]:
+            player = body["similar_undervalued"][0]
+            assert "player_id" in player
+            assert "name" in player
+            assert "valuation_date" in player
+            assert "position" in player
+            assert "age" in player
+            assert "competition" in player
+            assert "market_value_eur" in player
+            assert "predicted_value_eur" in player
+            assert "value_gap_eur" in player
+            assert "value_gap_pct" in player
+
+    def test_scout_player_not_found_returns_404(self):
+        """Verify 404 when player name not in database."""
+        mock_model = MagicMock()
+        mock_model.feature_names_in_ = np.array(
+            [
+                "age",
+                "position",
+                "player_club_domestic_competition_id",
+                "w365_goals",
+            ]
+        )
+
+        import footytrackr.api as api_module
+
+        scout_features = self._make_scout_features_df()
+
+        with (
+            patch.object(api_module, "model", mock_model),
+            patch.object(api_module, "_scout_features", scout_features),
+        ):
+            from footytrackr.api import app
+
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/scout/similar?player=NonexistentPlayer")
+
+        assert response.status_code == 404
+        body = response.json()
+        assert body["error"]["type"] == "not_found"
+        assert "not found" in body["error"]["message"].lower()
+
+    def test_scout_n_parameter_validation(self):
+        """Verify n parameter is validated (1-20)."""
+        mock_model = MagicMock()
+
+        import footytrackr.api as api_module
+
+        scout_features = self._make_scout_features_df()
+
+        with (
+            patch.object(api_module, "model", mock_model),
+            patch.object(api_module, "_scout_features", scout_features),
+        ):
+            from footytrackr.api import app
+
+            client = TestClient(app, raise_server_exceptions=False)
+
+            # Test n=0 (should fail)
+            response = client.get("/scout/similar?player=Messi&n=0")
+            assert response.status_code == 400
+
+            # Test n=21 (should fail)
+            response = client.get("/scout/similar?player=Messi&n=21")
+            assert response.status_code == 400
+
+    def test_scout_features_not_loaded_returns_503(self, tmp_path):
+        """Verify 503 when scout features are not available."""
+        mock_model = MagicMock()
+        mock_model.feature_names_in_ = np.array(["age"])
+
+        import footytrackr.api as api_module
+
+        with (
+            patch.object(api_module, "model", mock_model),
+            patch.object(api_module, "_scout_features", None),
+            patch.object(
+                api_module, "_FEATURES_PATH", tmp_path / "missing_features.csv"
+            ),
+            patch.object(api_module, "_PLAYERS_PATH", tmp_path / "missing_players.csv"),
+        ):
+            from footytrackr.api import app
+
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/scout/similar?player=Messi")
+
+        assert response.status_code == 503
+        body = response.json()
+        assert body["error"]["type"] == "service_unavailable"
+
+    def test_scout_uses_latest_real_features_for_batch_predictions(self, tmp_path):
+        """Predict from each player's latest snapshot in a single model call."""
+        import footytrackr.api as api_module
+
+        features_path = tmp_path / "features.csv"
+        players_path = tmp_path / "players.csv"
+        pd.DataFrame(
+            {
+                "player_id": [1, 1, 4],
+                "date": ["2024-04-01", "2025-04-06", "2025-03-01"],
+                "market_value_in_eur": [90_000_000.0, 100_000_000.0, 50_000_000.0],
+                "age": [24.0, 25.0, 25.0],
+                "position": ["Forward", "Forward", "Forward"],
+                "player_club_domestic_competition_id": ["ES1", "ES1", "ES1"],
+                "w365_goals": [2.0, 8.0, 4.0],
+            }
+        ).to_csv(features_path, index=False)
+        pd.DataFrame(
+            {"player_id": [1, 4], "name": ["Messi, Lionel", "Hazard, Eden"]}
+        ).to_csv(players_path, index=False)
+
+        mock_model = MagicMock()
+        mock_model.feature_names_in_ = np.array(
+            [
+                "age",
+                "position",
+                "player_club_domestic_competition_id",
+                "w365_goals",
+            ]
+        )
+        mock_model.predict.side_effect = lambda frame: np.log(
+            frame["w365_goals"].to_numpy() + 1
+        )
+
+        with (
+            patch.object(api_module, "model", mock_model),
+            patch.object(api_module, "_scout_features", None),
+            patch.object(api_module, "_FEATURES_PATH", features_path),
+            patch.object(api_module, "_PLAYERS_PATH", players_path),
+        ):
+            reference, peers = api_module._find_similar_players("messi, lionel")
+
+        assert mock_model.predict.call_count == 1
+        predicted_features = mock_model.predict.call_args.args[0]
+        assert predicted_features["w365_goals"].tolist() == [8.0, 4.0]
+        assert reference["valuation_date"] == "2025-04-06"
+        assert np.isclose(reference["predicted_value_eur"], 9.0)
+        assert peers[0]["valuation_date"] == "2025-03-01"
+        assert np.isclose(peers[0]["predicted_value_eur"], 5.0)

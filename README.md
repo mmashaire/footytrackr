@@ -2,294 +2,189 @@
 
 [![CI](https://github.com/mmashaire/footytrackr/actions/workflows/ci.yml/badge.svg)](https://github.com/mmashaire/footytrackr/actions/workflows/ci.yml)
 
-**A portfolio project showing how to build a reliable football valuation workflow with data engineering, interpretable ML, and production-minded software practices.**
+Footytrackr is a football data project that estimates a player's Transfermarkt
+market value from their recent performance and player profile. It shows the
+full path from data preparation to model evaluation and a small prediction API.
 
-Footytrackr answers one practical question: *Can we estimate player market value in a way that is simple, reproducible, honest about uncertainty, and easy to explain?*
+The estimates are for learning and comparison. They are not transfer fees,
+financial advice, or a replacement for a scout's judgment.
 
-The project uses historical Transfermarkt data to build a transparent pipeline for feature engineering, training, evaluation, and prediction. It is designed to feel like a small real-world product rather than a notebook experiment.
+## What the project does
 
-## What This Project Demonstrates
+- Builds player features from historical data, including statistics from the
+  previous 180 and 365 days.
+- Trains an interpretable Ridge regression model.
+- Tests the model on later dates than the training data.
+- Reports prediction errors and an 80% prediction interval.
+- Provides a command-line interface and a FastAPI service.
+- Compares similar players using their latest available data.
 
-### Data & ML  
-- **Leakage-safe evaluation**: Strict time-based splits; no information leakage  
-- **Interpretable modeling**: Ridge regression on engineered features, not black-box complexity  
-- **Honest uncertainty**: Every prediction includes calibrated confidence intervals  
-- **Comprehensive diagnostics**: Error analysis by position, league, and decile; bias detection and correction  
-- **Reproducible artifacts**: Versioned features, metrics, and model outputs—compare and iterate safely
+## Model results
 
-### Software Engineering  
-- **Type safety**: Strict mypy configuration; all public code type-hinted  
-- **Automated testing**: 41+ tests covering data pipelines, API endpoints, CLI, and reporting  
-- **CI/CD pipeline**: Black, isort, mypy, and pytest on every push  
-- **Input validation**: API rejects unrealistic ages, negative stats, and empty fields  
-- **Consistent error handling**: Stable JSON error shapes; clear failure messages  
-- **Operational readiness checks**: A dedicated CLI health command now verifies model and interval artifacts before serving predictions  
-- **Docker support**: Reproducible environment; easy deployment
+These results come from the saved v3 evaluation. The model was trained on
+valuations from 2003-12-09 through 2022-05-17 and tested on later valuations
+through 2025-04-06.
 
-### Code Quality  
-- **Small, focused functions**: Easy to test, debug, and reason about  
-- **Clear documentation**: Model Card details architecture, limitations, and ethics considerations  
-- **Production-grade API**: FastAPI with Pydantic schemas, request validation, and local explainability  
-- **Clean CLI**: Intuitive subcommands for data pipelines, training, reporting, and predictions
+| Measure | Result |
+| --- | ---: |
+| Test rows | 99,567 |
+| Mean absolute error | €2.34M |
+| Median absolute error | €385K |
+| Log-scale RMSE | 1.129 (global median baseline: 1.718) |
+| 80% prediction interval coverage | 80.8% |
 
-## Key Results
+The large difference between mean and median error reflects a long-tailed
+valuation range: a small number of very expensive players can strongly affect
+the mean error. The model also underpredicts on average in the saved evaluation.
+See [`artifacts/model_report_v3.md`](artifacts/model_report_v3.md) and the
+[Model Card](MODELCARD.md) for more detail.
 
-- **~€2.34M MAE** on held-out 2022–2025 data  
-- **80.8% empirical coverage** against 80% target (well-calibrated intervals)  
-- **34% better than naive baselines** (median or mean player value)  
-- **Leakage-free**: Trained on 2003–2022; evaluated on future data only  
-- **Interpretable**: Top coefficients clearly identify value drivers per position and context
+These are historical results, not a promise of future accuracy. The data ends
+on 2025-04-06, and market values are estimates rather than confirmed transfer
+prices.
 
-The model is not flashy. It is designed to be reliable, transparent, and useful.
+## How the estimate works
 
-## Model Architecture & Design Decisions
+The model uses 36 features, including age, position, league, and recent
+appearance statistics. It predicts the log of market value, then converts the
+result back to euros.
 
-### Why Ridge Regression?
+The API also returns an **80% prediction interval**. In the held-out test data,
+about 80.8% of values fell inside that range. This is an overall test result;
+it does not mean every player's interval has the same accuracy.
 
-Interpretability matters. Ridge regression keeps coefficients human-readable so stakeholders can understand what drives valuations. The log-transformed target space is justified because market values span orders of magnitude (€100K to €300M+); linear regression on the log scale is stable and explainable.
+## Try the project
 
-**Performance trade-off**: Ridge performs ~34% better than naive baselines (using median or mean player value) while remaining simple enough to debug and defend.
+### Install and run tests
 
-### Feature Engineering
-
-The model uses rolling windows (180 and 365 days) to capture form momentum:
-- **Per-90 rates**: Goals, assists, cards—normalized for playing time  
-- **Context**: Age, position, club, league  
-- **Recency**: Shorter windows weight recent performance  
-
-All features are versioned (v1, v2, v3) so you can compare engineering decisions.
-
-### Uncertainty Quantification
-
-Every prediction includes a **90% confidence interval** derived from residual quantiles on training data. On held-out 2022–2025 data:
-- **Target coverage**: 80%  
-- **Actual coverage**: 80.8%  
-- **Coverage gap**: +0.8% (well calibrated)
-
-This is more useful than a point estimate alone.
-
-### Bias & Diagnostics
-
-Because the model operates in log space, back-transformation can introduce bias. The project:
-1. **Detects bias** by group (position, league, valuation tier)  
-2. **Quantifies bias** with signed error analysis  
-3. **Tests corrections** (global and groupwise smearing)  
-4. **Reports honestly** about limitations (see [MODELCARD.md](MODELCARD.md))
-
-The goal is not perfection—it's visibility into where the model struggles.
-
-## Project Structure
-
-```
-footytrackr/
-├── scripts/           # Data pipeline: cleaning, features, training, diagnostics
-├── data/
-│   ├── raw/          # Original Transfermarkt snapshots
-│   ├── processed/    # Cleaned tables
-│   └── features/     # Versioned feature sets (v1, v2, v3)
-├── footytrackr/      # Package code
-│   ├── api.py        # FastAPI prediction server
-│   ├── cli.py        # Command-line interface
-│   └── reporting.py  # Model diagnostics
-├── tests/            # 41+ regression tests
-├── artifacts/        # Trained models, metrics, reports
-├── examples/         # Sample player JSON files
-└── MODELCARD.md      # Full model documentation
-```
-
-### Data Pipeline
-
-Raw Transfermarkt data flows through:
-1. **Cleaning** (`clean_players.py`, `clean_club_games.py`)  
-2. **Feature engineering** (`02_build_value_features_v3.py`)  
-3. **Model training** (`03_train_market_value.py`)  
-4. **Diagnostics** (`06_error_analysis.py`, `07_bias_correction.py`, `09_prediction_intervals.py`)  
-5. **Reporting** (`10_model_report.py`)
-
-Each stage produces versioned outputs so you can audit and reproduce results.
-
-## Quick Start
-
-### Install
+Use Python 3.10 or 3.11, which are the versions tested by CI:
 
 ```bash
-pip install -r requirements.txt
-pip install -e ".[dev,api]"
+python -m pip install -e ".[dev,api]"
+python -m pytest tests/ -q
 ```
 
-### Check Project Readiness (CLI)
+### Before making predictions
 
-Before using the model locally, you can confirm the API, model artifact, and prediction interval files are all in a healthy state:
+The source code, tests, examples, and small evaluation reports are on GitHub.
+The raw data and trained model file are not. They are kept out of Git, so a
+fresh clone can run the tests but cannot make predictions until you supply the
+data and model artifacts locally.
+
+For predictions, the API needs:
+
+- `artifacts/ridge_model_v3.joblib`
+- `artifacts/prediction_interval_summary_v3.json`
+
+The model file is created by the training workflow. To rebuild the model, first
+place the required source CSVs in `data/raw/`; those data files are not included
+in this repository. Check the data provider's terms before using or sharing
+those files.
+
+Once the model artifacts are available, check readiness and make a prediction:
 
 ```bash
 footytrackr health
-```
-
-A successful check returns a JSON payload like:
-
-```json
-{"status": "healthy", "model_loaded": true}
-```
-
-### Try a Prediction (CLI)
-
-**Quick prediction:**
-```bash
-footytrackr predict --input-file examples/young_striker_gb1.json --scout-assistant
-```
-
-**With feature explanations:**
-```bash
 footytrackr predict --input-file examples/young_striker_gb1.json --explain
 ```
 
-**Inline JSON:**
+To include a short scouting summary:
+
 ```bash
-footytrackr predict --json '{"age": 25, "position": "Centre-Forward", "w180_games_played": 15, "w180_minutes_played": 1200, "w180_goals": 8, "w180_assists": 3, "w180_yellow_cards": 2, "w180_red_cards": 0, "w365_games_played": 30, "w365_minutes_played": 2500, "w365_goals": 14, "w365_assists": 6, "w365_yellow_cards": 4, "w365_red_cards": 0, "player_club_domestic_competition_id": "GB1"}'
+footytrackr predict \
+  --input-file examples/young_striker_gb1.json \
+  --explain \
+  --scout-assistant
 ```
 
-### Try the API
+## Run the API
+
+With the model artifacts in place, start the service:
 
 ```bash
-uvicorn footytrackr.api:app --reload
-curl -X POST "http://localhost:8000/predict?explain=true" \
+footytrackr api --host 127.0.0.1 --port 8000
+```
+
+The interactive API guide is at `http://127.0.0.1:8000/docs`.
+
+Main endpoints:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /health` | Check that the model and prediction interval are ready. |
+| `POST /predict` | Estimate a player's value from a JSON feature set. |
+| `GET /scout/similar` | Compare a player with similar players in the same league. |
+
+Example request:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/predict?explain=true" \
   -H "Content-Type: application/json" \
   -d @examples/young_striker_gb1.json
 ```
 
-### Generate Model Report
+### Similar-player comparisons
+
+For example, compare Lionel Messi with up to five players:
 
 ```bash
-footytrackr model-report
+curl "http://127.0.0.1:8000/scout/similar?player=Lionel%20Messi&n=5"
 ```
-Outputs `artifacts/model_report_v3.md` with error analysis, bias assessment, and risk flags.
 
-## Full API Usage & Examples
+The endpoint uses the latest available feature row for each player, then
+compares players with the same position and league and within two years of age.
+It includes the date for each row because players' records may come from
+different dates. Results are ranked by the difference between the model estimate
+and the recorded market value. A positive difference is a reason to investigate,
+not proof that a player is undervalued.
 
-### Prediction with Scout Assistant (Recommended for First Use)
+Scouting also needs the local feature file
+`data/features/player_value_features_v3.csv` and player names in
+`data/processed/players_clean.csv`.
 
-The Scout Assistant output combines point estimate, uncertainty, and explainability:
+## Data and training workflow
+
+The scripts expect local input files under `data/`. That folder is not tracked
+by Git. The feature-building and model-training commands are:
 
 ```bash
-footytrackr predict --input-file examples/young_striker_gb1.json --explain --scout-assistant
-```
-
-Example output:
-```json
-{
-  "predicted_value_eur": 460132.71,
-  "confidence_interval": {"lower": 112345.89, "upper": 987654.32},
-  "interval_coverage": 0.8079,
-  "explanation": {
-    "top_positive": [{"feature": "w180_goals", "feature_value": 8.0, "contribution_log": 0.9}],
-    "top_negative": [{"feature": "age", "feature_value": 25.0, "contribution_log": -0.2}]
-  },
-  "scout_assistant": {
-    "summary": "Estimated market value is EUR 460K with a 90% interval from EUR 112K to EUR 988K.",
-    "valuation_band": "Development or depth option",
-    "uncertainty_level": "high",
-    "key_positives": ["w180_goals"],
-    "key_risks": ["age"]
-  }
-}
-```
-
-### REST API
-
-Start the server:
-```bash
-uvicorn footytrackr.api:app --host 0.0.0.0 --port 8000 --reload
-```
-
-**Health check** (validates model & prediction intervals are ready):
-```bash
-curl http://localhost:8000/health
-# Returns {"status": "healthy", "model_loaded": true}
-# Or {"status": "unhealthy", "reason": "model_not_loaded"} if artifacts missing
-```
-
-Request with explanations:
-```bash
-curl -X POST "http://localhost:8000/predict?explain=true&scout_assistant=true" \
-  -H "Content-Type: application/json" \
-  -d @examples/young_striker_gb1.json
-```
-
-PowerShell:
-```powershell
-$body = Get-Content .\examples\young_striker_gb1.json -Raw
-Invoke-RestMethod -Method Post -Uri "http://localhost:8000/predict?explain=true&scout_assistant=true" \
-  -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 10
-```
-
-### Model Reporting
-
-Generate a diagnostic report with error breakdown and risk assessment:
-```bash
-footytrackr model-report
-```
-
-Outputs `artifacts/model_report_v3.md` (human-readable) and `artifacts/model_report_v3.json` (structured).
-
-### Running the Full Pipeline
-
-To retrain from scratch:
-```bash
-# Feature engineering (v1, v2, v3)
 footytrackr build-features --version v3
-
-# Training
 footytrackr train
+```
 
-# Analysis & reporting
+The repository also includes scripts for error analysis, bias checks, prediction
+intervals, and reports. Run them with the matching `footytrackr` subcommands;
+they rely on the local feature data and artifacts. For example:
+
+```bash
 footytrackr error-analysis
-footytrackr bias-correction
-footytrackr groupwise-bias-correction
 footytrackr prediction-intervals
 footytrackr model-report
 ```
 
-Or run all at once:
-```bash
-footytrackr pipeline
+## Project files
+
+```text
+footytrackr/   API, command-line interface, and report generation
+scripts/       Data preparation, feature building, training, and analysis
+tests/         Automated tests
+examples/      Example prediction requests
+artifacts/     Saved metrics, reports, and diagnostic results
+data/          Local source and processed data (not tracked by Git)
+MODELCARD.md   Model details, intended use, and limitations
 ```
 
-## Documentation
+## Checks and documentation
 
-- **[MODELCARD.md](MODELCARD.md)**: Full model documentation (architecture, data, performance, limitations, ethics)
-- **[CONTRIBUTING.md](CONTRIBUTING.md)**: Contributing guidelines and code standards
-- **[CI Workflow](.github/workflows/ci.yml)**: Type checking, linting, and testing on every push
+GitHub Actions runs formatting, import-order, type, and lint checks, then runs
+the test suite on Python 3.10 and 3.11.
 
-## Tech Stack
-
-- **Core**: Python 3.9+, pandas, numpy, scikit-learn
-- **Data**: duckdb, Transfermarkt snapshots
-- **API**: FastAPI, Pydantic, uvicorn
-- **Quality**: black, isort, mypy (strict), pytest
-- **Deployment**: Docker, GitHub Actions CI
-- **Visualization**: matplotlib, seaborn
-
-## Design Philosophy
-
-This project prioritizes **transparent engineering over hype**:
-- ✓ Interpretable models over black-box accuracy chasing
-- ✓ Versioned artifacts over hidden state
-- ✓ Leakage-free evaluation over inflated metrics
-- ✓ Calibrated uncertainty over false confidence
-- ✓ Clear trade-offs over overselling
-
-## For Hiring Managers & Code Reviewers
-
-**Data engineering signal**: Versioned pipelines, explicit feature engineering, reproducible artifacts, time-based splits with no leakage.
-
-**ML signal**: Leakage-safe evaluation, calibration analysis, bias detection, uncertainty quantification, comparison against baselines.
-
-**Software signal**: Type safety (strict mypy), automated testing (41+ tests), CI/CD, clean API design, error handling, production-ready code.
-
-**Communication signal**: Model Card documenting limitations, clear README explaining decisions, honest assessment of where the model fails.
-
-I'm happy to discuss design trade-offs, what I'd productionize next, or architectural decisions in more detail.
+- [Model Card](MODELCARD.md)
+- [Contributing guide](CONTRIBUTING.md)
+- [CI workflow](.github/workflows/ci.yml)
 
 ## Disclaimer
 
-Transfermarkt market values are estimates, not ground truth. This model captures patterns in those estimates; interpretation should reflect that.
+Transfermarkt market values are estimates, not ground truth. This model learns
+patterns in those estimates. Use its predictions as one source of information,
+and consider their uncertainty and the data's age.

@@ -47,6 +47,12 @@ except FileNotFoundError:
     print(f"Warning: Prediction interval summary not found at {_PI_PATH}")
     _Q10, _Q90, _PI_COVERAGE = -0.0, 0.0, 0.0
 
+# Loaded on the first scouting request so standard predictions do not read the
+# larger feature dataset during API startup.
+_FEATURES_PATH = PACKAGE_ROOT / "data" / "features" / "player_value_features_v3.csv"
+_PLAYERS_PATH = PACKAGE_ROOT / "data" / "processed" / "players_clean.csv"
+_scout_features: pd.DataFrame | None = None
+
 
 class PlayerFeatures(BaseModel):
     """Request schema for player value prediction.
@@ -204,6 +210,34 @@ class PredictionResponse(BaseModel):
     scout_assistant: Optional[ScoutAssistantReport] = None
 
 
+class SimilarPlayer(BaseModel):
+    """A player profile similar to the reference player."""
+
+    player_id: int
+    name: str
+    valuation_date: str
+    position: str
+    age: float
+    competition: str
+    market_value_eur: float
+    predicted_value_eur: float
+    value_gap_eur: float
+    value_gap_pct: float
+
+
+class SimilarPlayersResponse(BaseModel):
+    """Model valuation comparison for a reference player and similar profiles."""
+
+    reference_player: str
+    reference_valuation_date: str
+    reference_position: str
+    reference_age: float
+    reference_market_value_eur: float
+    reference_predicted_value_eur: float
+    similar_undervalued: list[SimilarPlayer]
+    comparison_criteria: str
+
+
 def _http_error_type(status_code: int) -> str:
     """Map HTTP status codes to stable, API-friendly error identifiers."""
     return {
@@ -297,7 +331,7 @@ def _build_prediction_frame(features: PlayerFeatures) -> pd.DataFrame:
         df[f"{window}_played_any_minutes"] = (minutes > 0).astype(int)
 
     # Numeric columns should have NaN; fillna(0) handles them
-    # Categorical columns should have empty strings; they won't be filled and will be imputed
+    # Categorical columns use empty strings for pipeline imputation.
     return df.fillna(0)
 
 
@@ -462,9 +496,17 @@ def _build_scout_assistant_report(
     uncertainty_level = _uncertainty_level(predicted_value_eur, ci_lower, ci_upper)
 
     confidence_note_by_level = {
-        "low": "Signal is relatively stable for this profile; use as a strong benchmark.",
-        "medium": "Signal is directionally useful, but pair with contract and scouting context.",
-        "high": "Treat this as a broad range estimate and rely on additional scouting evidence.",
+        "low": (
+            "Signal is relatively stable for this profile; use as a strong benchmark."
+        ),
+        "medium": (
+            "Signal is directionally useful, but pair with contract and "
+            "scouting context."
+        ),
+        "high": (
+            "Treat this as a broad range estimate and rely on additional "
+            "scouting evidence."
+        ),
     }
 
     key_positives = [item.feature for item in explanation.top_positive]
@@ -537,6 +579,154 @@ def predict_from_features(
     )
 
 
+def _get_scout_features(feature_columns: list[str]) -> pd.DataFrame:
+    """Load and cache each player's latest feature and valuation snapshot.
+
+    The CSV is read only when the scouting endpoint is first used.
+    """
+    global _scout_features
+    if _scout_features is None:
+        missing_paths = [
+            path.name for path in (_FEATURES_PATH, _PLAYERS_PATH) if not path.is_file()
+        ]
+        if missing_paths:
+            raise RuntimeError(
+                "Scout data unavailable; missing files: " + ", ".join(missing_paths)
+            )
+
+        features = pd.read_csv(
+            _FEATURES_PATH,
+            usecols=[
+                "player_id",
+                "date",
+                "market_value_in_eur",
+                *feature_columns,
+            ],
+            parse_dates=["date"],
+        )
+        latest_features = features.sort_values(["date", "player_id"]).drop_duplicates(
+            "player_id", keep="last"
+        )
+        players = pd.read_csv(_PLAYERS_PATH, usecols=["player_id", "name"])
+        _scout_features = latest_features.merge(
+            players,
+            on="player_id",
+            how="inner",
+            validate="one_to_one",
+        )
+
+    scout_features = _scout_features
+    if scout_features is None:
+        raise RuntimeError("Scout feature data could not be loaded")
+    return scout_features
+
+
+def _find_similar_players(
+    player_name: str,
+    n: int = 5,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Find players with similar position, age, and league profiles.
+
+    Returns:
+        (reference_player_info, list_of_similar_players_sorted_by_value_gap)
+    """
+    if model is None:
+        raise RuntimeError("Model not loaded; scout endpoint unavailable")
+
+    model_feature_names = getattr(model, "feature_names_in_", None)
+    if model_feature_names is None or len(model_feature_names) == 0:
+        raise RuntimeError("Model feature schema is unavailable for scouting")
+    feature_columns = list(model_feature_names)
+    scout_features = _get_scout_features(feature_columns)
+
+    # Case-insensitive lookup: filter by name
+    player_key = player_name.lower().strip()
+    ref_matches = scout_features[scout_features["name"].str.lower() == player_key]
+
+    if ref_matches.empty:
+        raise ValueError(
+            f"Player '{player_name}' not found in database. "
+            f"Check spelling or search for similar names."
+        )
+
+    ref_row = ref_matches.iloc[0]
+    player_id = ref_row["player_id"]
+
+    ref_position = ref_row["position"]
+    ref_age = ref_row["age"]
+    ref_league = ref_row["player_club_domestic_competition_id"]
+    ref_market_value = float(ref_row["market_value_in_eur"])
+    # Find peers: same position, age within ±2 years, same league
+    peers = scout_features[
+        (scout_features["position"] == ref_position)
+        & (scout_features["age"].between(ref_age - 2, ref_age + 2))
+        & (scout_features["player_club_domestic_competition_id"] == ref_league)
+        & (scout_features["player_id"] != player_id)
+    ].copy()
+
+    if peers.empty:
+        raise ValueError(
+            f"No similar players found for '{player_name}' "
+            f"(position: {ref_position}, age: {ref_age}, league: {ref_league})"
+        )
+
+    prediction_rows = pd.concat([ref_matches.iloc[[0]], peers], ignore_index=True)
+    predicted_log_values = np.asarray(
+        model.predict(prediction_rows[feature_columns]), dtype=float
+    )
+    if (
+        predicted_log_values.shape != (len(prediction_rows),)
+        or not np.isfinite(predicted_log_values).all()
+    ):
+        raise RuntimeError("Model returned invalid predictions for scout candidates")
+    predicted_values = np.exp(predicted_log_values)
+    if not np.isfinite(predicted_values).all():
+        raise RuntimeError("Scout candidate values could not be computed")
+
+    # Compare each model estimate with the player's recorded valuation.
+    similar_players = []
+    for peer_index, (_, peer) in enumerate(peers.iterrows(), start=1):
+        player_id_peer = int(peer["player_id"])
+        market_val = float(peer["market_value_in_eur"])
+        pred_val = float(predicted_values[peer_index])
+        value_gap = pred_val - market_val
+
+        similar_players.append(
+            {
+                "player_id": player_id_peer,
+                "name": str(peer["name"]),
+                "valuation_date": pd.Timestamp(peer["date"]).date().isoformat(),
+                "position": str(peer["position"]),
+                "age": float(peer["age"]),
+                "competition": str(peer["player_club_domestic_competition_id"]),
+                "market_value_eur": market_val,
+                "predicted_value_eur": pred_val,
+                "value_gap_eur": value_gap,
+                "value_gap_pct": (
+                    (value_gap / market_val * 100) if market_val > 0 else 0.0
+                ),
+            }
+        )
+
+    # Sort by predicted-value gap (descending), with player ID as a stable tie-break.
+    sorted_players: list[dict[str, Any]] = sorted(
+        similar_players,
+        key=lambda player: (-player["value_gap_eur"], player["player_id"]),
+    )
+
+    ref_info = {
+        "name": str(ref_row["name"]),
+        "valuation_date": pd.Timestamp(ref_row["date"]).date().isoformat(),
+        "predicted_value_eur": float(predicted_values[0]),
+        "position": ref_position,
+        "age": ref_age,
+        "league": ref_league,
+        "market_value_eur": ref_market_value,
+    }
+
+    return ref_info, sorted_players[:n]
+
+
 @app.get("/")
 def read_root() -> dict[str, str]:
     """Serve API root endpoint with welcome message."""
@@ -546,20 +736,20 @@ def read_root() -> dict[str, str]:
 @app.get("/health")
 def health_check() -> dict[str, Any]:
     """Check if API and model are healthy and ready.
-    
+
     Validates that:
     - Model artifact loads successfully
     - Prediction interval artifacts are available
     - Model can produce a valid test prediction
-    
+
     Returns "unhealthy" if any check fails, with specific reason.
     """
     if model is None:
         return {"status": "unhealthy", "reason": "model_not_loaded"}
-    
+
     if _PI_COVERAGE <= 0 or not np.isfinite(_Q10) or not np.isfinite(_Q90):
         return {"status": "unhealthy", "reason": "prediction_intervals_not_loaded"}
-    
+
     # Verify model can actually make a prediction with a minimal valid input
     try:
         test_features = PlayerFeatures(
@@ -586,7 +776,7 @@ def health_check() -> dict[str, Any]:
             "reason": "model_prediction_failed",
             "detail": str(exc),
         }
-    
+
     return {"status": "healthy", "model_loaded": True}
 
 
@@ -605,6 +795,69 @@ def predict_player_value(
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/scout/similar", response_model=SimilarPlayersResponse)
+def scout_similar_players(
+    player: str,
+    n: int = 5,
+) -> SimilarPlayersResponse:
+    """Compare model predictions with recorded values for similar players.
+
+    Criteria for similarity:
+    - Same position
+    - Age within ±2 years
+    - Same domestic league
+
+    Results are sorted by value gap (predicted - recorded market value).
+
+    Query Parameters:
+    - player: Exact player name (case-insensitive)
+    - n: Number of similar players to return (default: 5, max: 20)
+    """
+    if n < 1 or n > 20:
+        raise HTTPException(
+            status_code=400,
+            detail="Parameter 'n' must be between 1 and 20",
+        )
+
+    try:
+        ref_info, similar_list = _find_similar_players(player, n=n)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    # Convert to response schema
+    similar_players = [
+        SimilarPlayer(
+            player_id=p["player_id"],
+            name=p["name"],
+            valuation_date=p["valuation_date"],
+            position=p["position"],
+            age=p["age"],
+            competition=p["competition"],
+            market_value_eur=p["market_value_eur"],
+            predicted_value_eur=p["predicted_value_eur"],
+            value_gap_eur=p["value_gap_eur"],
+            value_gap_pct=p["value_gap_pct"],
+        )
+        for p in similar_list
+    ]
+
+    return SimilarPlayersResponse(
+        reference_player=ref_info["name"],
+        reference_valuation_date=ref_info["valuation_date"],
+        reference_position=ref_info["position"],
+        reference_age=ref_info["age"],
+        reference_market_value_eur=ref_info["market_value_eur"],
+        reference_predicted_value_eur=ref_info["predicted_value_eur"],
+        similar_undervalued=similar_players,
+        comparison_criteria=(
+            f"Position: {ref_info['position']}, Age: ±2 years from {ref_info['age']}, "
+            f"League: {ref_info['league']}"
+        ),
+    )
 
 
 if __name__ == "__main__":
